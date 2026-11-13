@@ -6,4 +6,4 @@ numpy==2.5.3
 fastapi==0.135.2
 uvicorn==0.42.0
 python-multipart==0.0.22
-soundfile==0.13.1
+av==19.0.2

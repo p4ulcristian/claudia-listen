@@ -47,7 +47,7 @@ answers once it is. `LISTEN_TOKEN_FILE` puts the token somewhere else.
 
 | field | |
 |---|---|
-| `file` | the clip: WAV, FLAC or OGG, any sample rate, up to 25 MB |
+| `file` | the clip: WAV, FLAC, OGG, MP3, MP4/M4A or WebM (anything FFmpeg reads), any sample rate, up to 25 MB |
 | `language` | optional, e.g. `en`: forces that language; without it the model tells |
 | `prompt` | optional: names and terms the clip may hold ("Omarchy, Postgres"), which the model leans towards |
 | `response_format` | `json` (default): `{"text": "..."}`; `text`: the text alone |

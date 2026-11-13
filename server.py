@@ -1,7 +1,8 @@
 """iris-listen: speech to text on your own GPU, Qwen3-ASR-1.7B behind OpenAI's transcription API.
 
     POST /v1/audio/transcriptions   multipart form → {"text": ...}
-        file             the clip: WAV, FLAC or OGG (anything libsndfile reads), any rate, mono or not
+        file             the clip: WAV, FLAC, OGG, MP3, MP4/M4A or WebM (what browsers record;
+                         anything FFmpeg reads), any rate, mono or not
         language         optional, e.g. "en": forces that language; without it the model tells
         prompt           optional: names and terms the clip may hold, which the model leans towards
         response_format  "json" (default) or "text"
@@ -35,8 +36,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import av
 import numpy as np
-import soundfile
 import uvicorn
 from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -120,14 +121,16 @@ def split_at_pauses(samples: np.ndarray, max_seconds: float = 28.0,
 
 
 def decode(data: bytes) -> np.ndarray:
-    """The clip as 16 kHz mono float32."""
-    samples, rate = soundfile.read(io.BytesIO(data), dtype="float32", always_2d=True)
-    samples = samples.mean(axis=1)
-    if rate != RATE and len(samples):
-        n = round(len(samples) * RATE / rate)
-        samples = np.interp(np.linspace(0, len(samples) - 1, n),
-                            np.arange(len(samples)), samples).astype(np.float32)
-    return samples
+    """The clip as 16 kHz mono float32, from any container and codec FFmpeg reads (PyAV)."""
+    resampler = av.AudioResampler(format="flt", layout="mono", rate=RATE)
+    chunks = []
+    with av.open(io.BytesIO(data)) as clip:
+        if not clip.streams.audio:
+            raise ValueError("it has no sound")
+        for frame in clip.decode(clip.streams.audio[0]):
+            chunks += [f.to_ndarray().reshape(-1) for f in resampler.resample(frame)]
+    chunks += [f.to_ndarray().reshape(-1) for f in resampler.resample(None)]
+    return np.concatenate(chunks).astype(np.float32) if chunks else np.zeros(0, np.float32)
 
 
 token = b""                 # from --token-file, before the first request
@@ -169,7 +172,7 @@ async def transcriptions(
     data = await file.read()
     try:
         samples = decode(data)
-    except soundfile.LibsndfileError as exc:
+    except (av.FFmpegError, ValueError) as exc:
         raise HTTPException(400, f"cannot read the clip: {exc}") from exc
 
     def recognize() -> str:
