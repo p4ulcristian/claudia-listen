@@ -62,10 +62,14 @@ LANGUAGES = frozenset("bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt 
 CUTS = {"min_silence_duration_ms": 250, "max_speech_duration_s": 20, "speech_pad_ms": 100}
 
 # How many stretches go through the model at once. The GPU is shared (OmniVoice, games), and a
-# long clip's eight 20 s stretches at once once asked for more memory than was left: the model
-# failed and the clip was lost. Two at a time; when even that finds no memory, one at a time; and
-# when that too fails, the CPU, slower but never out of memory.
+# long clip's eight 20 s stretches at once once asked for more memory than was left. Two at a time;
+# when even that finds no memory, one at a time. Never on the CPU (the person's rule): with no
+# memory even for one stretch the clip is refused (503) and the caller keeps it to try again.
 BATCH = 2
+
+
+class GpuFull(Exception):
+    """The GPU has no memory left even for one stretch: the clip is refused, to be sent again."""
 
 
 def out_of_memory(e: Exception) -> bool:
@@ -91,7 +95,6 @@ class Speech:
 
         ort.preload_dlls()   # CUDA and cuDNN come from pip wheels; load them before the first session
         self.languages = languages
-        self.path = path
         self.vad = onnx_asr.load_vad("silero", vad_path, providers=["CPUExecutionProvider"])
         self.plain = onnx_asr.load_model(
             "nemo-canary-1b-v2", path=path,
@@ -101,16 +104,6 @@ class Speech:
         )
         self.model = self.plain.with_vad(self.vad, **CUTS, batch_size=BATCH).with_timestamps()
         self.single = self.plain.with_vad(self.vad, **CUTS, batch_size=1).with_timestamps()
-        self.cpu = None   # loaded the first time the GPU has no room even for one stretch
-
-    def on_cpu(self):
-        """The same model on the CPU (loaded once, on first need: about 4 GB of memory)."""
-        if self.cpu is None:
-            import onnx_asr
-            log.warning("loading the model on the CPU: the GPU has no memory left")
-            plain = onnx_asr.load_model("nemo-canary-1b-v2", path=self.path, providers=["CPUExecutionProvider"])
-            self.cpu = plain.with_vad(self.vad, **CUTS, batch_size=1).with_timestamps()
-        return self.cpu
 
     def warmup(self) -> None:
         """Allocate the GPU memory now, so the first clip doesn't wait for it.
@@ -121,15 +114,19 @@ class Speech:
     def recognize(self, samples: np.ndarray, language: str | None) -> str:
         """16 kHz audio, in `language`, or else each stretch in the one of
         `languages` the model is surest of. Out of GPU memory: again one
-        stretch at a time, then on the CPU (BATCH)."""
-        for name, model in (("gpu", lambda: self.model), ("gpu, one at a time", lambda: self.single), ("cpu", self.on_cpu)):
-            try:
-                return self.written(model(), samples, language)
-            except Exception as e:   # onnxruntime's Fail carries no type of its own
-                if not out_of_memory(e) or name == "cpu":
-                    raise
-                log.warning("out of GPU memory (%s): trying the next way", name)
-        raise AssertionError("unreachable")
+        stretch at a time (BATCH); still out: GpuFull."""
+        try:
+            return self.written(self.model, samples, language)
+        except Exception as e:   # onnxruntime's Fail carries no type of its own
+            if not out_of_memory(e):
+                raise
+            log.warning("out of GPU memory: again one stretch at a time")
+        try:
+            return self.written(self.single, samples, language)
+        except Exception as e:
+            if out_of_memory(e):
+                raise GpuFull() from e
+            raise
 
     def written(self, model, samples: np.ndarray, language: str | None) -> str:
         """The text of 16 kHz audio through one model (see recognize)."""
@@ -205,7 +202,10 @@ async def transcriptions(
         log.info("%.1fs audio -> %.2fs: %d chars", len(samples) / RATE, time.time() - t0, len(text))
         return text
 
-    text = await asyncio.get_running_loop().run_in_executor(worker, recognize) if len(samples) else ""
+    try:
+        text = await asyncio.get_running_loop().run_in_executor(worker, recognize) if len(samples) else ""
+    except GpuFull as exc:
+        raise HTTPException(503, "the GPU has no memory left just now: send the clip again") from exc
     if response_format == "text":
         return PlainTextResponse(text)
     return JSONResponse({"text": text})
