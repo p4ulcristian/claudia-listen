@@ -61,6 +61,17 @@ LANGUAGES = frozenset("bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt 
 # word loses its first or last sound.
 CUTS = {"min_silence_duration_ms": 250, "max_speech_duration_s": 20, "speech_pad_ms": 100}
 
+# How many stretches go through the model at once. The GPU is shared (OmniVoice, games), and a
+# long clip's eight 20 s stretches at once once asked for more memory than was left: the model
+# failed and the clip was lost. Two at a time; when even that finds no memory, one at a time; and
+# when that too fails, the CPU, slower but never out of memory.
+BATCH = 2
+
+
+def out_of_memory(e: Exception) -> bool:
+    """Whether ONNX Runtime failed because the GPU had no memory left for it."""
+    return "Failed to allocate memory" in str(e)
+
 
 class Speech:
     """Canary-1B-v2 on the GPU, through onnx-asr (fp32 ONNX), behind Silero VAD.
@@ -80,14 +91,26 @@ class Speech:
 
         ort.preload_dlls()   # CUDA and cuDNN come from pip wheels; load them before the first session
         self.languages = languages
-        vad = onnx_asr.load_vad("silero", vad_path, providers=["CPUExecutionProvider"])
+        self.path = path
+        self.vad = onnx_asr.load_vad("silero", vad_path, providers=["CPUExecutionProvider"])
         self.plain = onnx_asr.load_model(
             "nemo-canary-1b-v2", path=path,
             # Grow the memory pool only by what is asked for, not in doubling steps.
             providers=[("CUDAExecutionProvider", {"arena_extend_strategy": "kSameAsRequested"}),
                        "CPUExecutionProvider"],
         )
-        self.model = self.plain.with_vad(vad, **CUTS).with_timestamps()
+        self.model = self.plain.with_vad(self.vad, **CUTS, batch_size=BATCH).with_timestamps()
+        self.single = self.plain.with_vad(self.vad, **CUTS, batch_size=1).with_timestamps()
+        self.cpu = None   # loaded the first time the GPU has no room even for one stretch
+
+    def on_cpu(self):
+        """The same model on the CPU (loaded once, on first need: about 4 GB of memory)."""
+        if self.cpu is None:
+            import onnx_asr
+            log.warning("loading the model on the CPU: the GPU has no memory left")
+            plain = onnx_asr.load_model("nemo-canary-1b-v2", path=self.path, providers=["CPUExecutionProvider"])
+            self.cpu = plain.with_vad(self.vad, **CUTS, batch_size=1).with_timestamps()
+        return self.cpu
 
     def warmup(self) -> None:
         """Allocate the GPU memory now, so the first clip doesn't wait for it.
@@ -97,9 +120,21 @@ class Speech:
 
     def recognize(self, samples: np.ndarray, language: str | None) -> str:
         """16 kHz audio, in `language`, or else each stretch in the one of
-        `languages` the model is surest of."""
+        `languages` the model is surest of. Out of GPU memory: again one
+        stretch at a time, then on the CPU (BATCH)."""
+        for name, model in (("gpu", lambda: self.model), ("gpu, one at a time", lambda: self.single), ("cpu", self.on_cpu)):
+            try:
+                return self.written(model(), samples, language)
+            except Exception as e:   # onnxruntime's Fail carries no type of its own
+                if not out_of_memory(e) or name == "cpu":
+                    raise
+                log.warning("out of GPU memory (%s): trying the next way", name)
+        raise AssertionError("unreachable")
+
+    def written(self, model, samples: np.ndarray, language: str | None) -> str:
+        """The text of 16 kHz audio through one model (see recognize)."""
         langs = [language] if language else self.languages
-        versions = [list(self.model.recognize(samples, sample_rate=RATE, language=lang)) for lang in langs]
+        versions = [list(model.recognize(samples, sample_rate=RATE, language=lang)) for lang in langs]
         texts = []
         for stretch in zip(*versions, strict=True):
             scores = [float(np.mean(s.logprobs)) if s.logprobs else -np.inf for s in stretch]

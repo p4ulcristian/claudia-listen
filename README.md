@@ -32,7 +32,10 @@ any program ── Bearer token, a clip (+ language) ──▶ iris-listen (serv
 - **Stretches**: Silero VAD cuts a clip at pauses of 250 ms or more (a stretch
   is at most 20 s); silence gives `""`. Whole clips, no stream.
 - **Speed** on an RTX 5060 Ti, with two languages: about 0.3 s for a 5 s sentence.
-- **Memory**: about 6 GB of GPU memory while it runs.
+- **Memory**: about 6-8 GB of GPU memory while it runs. The GPU may be shared (other models,
+  games): two stretches of speech go through the model at a time; when the GPU has no memory left,
+  the clip is done again one stretch at a time, and then on the CPU (that copy of the model, about
+  4 GB of RAM, loads on first need). A clip is never refused for want of GPU memory.
 
 ## Install
 
