@@ -1,10 +1,11 @@
-"""iris-listen: speech to text on your own GPU, Qwen3-ASR-1.7B behind OpenAI's transcription API.
+"""iris-listen: speech to text on your own GPU, Canary-1B-v2 behind OpenAI's transcription API.
 
     POST /v1/audio/transcriptions   multipart form → {"text": ...}
         file             the clip: WAV, FLAC, OGG, MP3, MP4/M4A or WebM (what browsers record;
                          anything FFmpeg reads), any rate, mono or not
-        language         optional, e.g. "en": forces that language; without it the model tells
-        prompt           optional: names and terms the clip may hold, which the model leans towards
+        language         optional, e.g. "en": forces that language; without it the clip is
+                         written out in each of --languages and the one the model is surest of wins, sentence by sentence
+        prompt           accepted and ignored: Canary takes no context
         response_format  "json" (default) or "text"
         model            accepted and ignored (OpenAI's clients send it)
     GET  /health                    "ok"
@@ -13,14 +14,14 @@ Every request needs `Authorization: Bearer <token>`, the token in --token-file
 (install.sh makes one); without it the answer is 401. So it is safe on any
 address, behind a proxy or not.
 
-Run it with this folder's venv:  .venv/bin/python server.py --token-file <file>
+Run it with this folder's venv:  .venv/bin/python server.py --token-file <file> ...
 It listens on 127.0.0.1 by default. Each --host adds an address; one that is
 not up yet (a VPN's) is bound anyway and starts answering when it comes up.
 
-The model writes down what was said, never a translation: told "en" for
-Hungarian speech, it still writes Hungarian. It hears a whole clip at once, so a
-clip over 28 s is cut at its quietest moments into pieces the model's
-fixed-size cache holds. One clip at a time; others wait.
+Canary has no language detection: told a language, it writes in that
+language, and told the wrong one it translates. So a forced language must be
+the one spoken. Silero VAD cuts each clip into stretches of speech at its
+pauses; silence gives "". One clip at a time; others wait.
 """
 
 from __future__ import annotations
@@ -47,77 +48,66 @@ log = logging.getLogger("iris-listen")
 
 RATE = 16000
 MAX_BYTES = 25 * 1024 * 1024   # OpenAI's limit too
-MAX_PROMPT = 2000              # characters; the prompt shares the model's cache with the audio
-# Prompt plus answer, in tokens. The prompt is ~50 tokens, 8 per second of
-# audio (a 28 s piece: ~275) and the vocabulary; the answer 3-4 per second.
-# ~115 KB of VRAM per token.
-CACHE_TOKENS = 2048
-MAX_NEW_TOKENS = 384
+# The 25 languages Canary-1B-v2 is trained on (its model card). Its vocabulary
+# has a token for every ISO code, but it only knows these.
+LANGUAGES = frozenset("bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk".split())
+
+
+# Where a clip is cut into stretches of speech (Silero VAD): at a pause of at
+# least 250 ms, so a stretch is a sentence or less and its language is picked
+# on its own (with 500 ms, a switch of language after a 0.3 s pause lost the
+# second language's sentences); a stretch over 20 s is cut anyway (Canary is trained on
+# clips up to 40 s). Each stretch keeps 0.1 s of the quiet around it, so no
+# word loses its first or last sound.
+CUTS = {"min_silence_duration_ms": 250, "max_speech_duration_s": 20, "speech_pad_ms": 100}
 
 
 class Speech:
-    """Qwen3-ASR-1.7B on the GPU, through transformers.
+    """Canary-1B-v2 on the GPU, through onnx-asr (fp32 ONNX), behind Silero VAD.
 
-    It is an audio encoder in front of a small language model, so the text is
-    written one token at a time: about 15 ms per token on an RTX 5060 Ti, 0.3 s
-    for a 7 s sentence. Those 15 ms need a fixed-size KV cache and torch.compile
-    with CUDA graphs (plain generate() takes 25 ms a token). The cache never
-    changes shape, so the decoder step is compiled once, at warmup, and no clip
-    length recompiles it. CUDA graphs belong to the thread that made them, so
-    every call runs on the one model thread (`worker`).
+    Canary has no language detection, so with several `languages` each
+    stretch of speech is written out in every one of them and the version
+    with the highest mean token log-probability wins: the language spoken
+    scores about -0.01 to -0.06, a translation about -0.15 to -0.3. Picking
+    per stretch keeps both languages of a clip that switches between them.
+    Silence makes no stretch, so it comes back as "". Every model call runs
+    on the one model thread (`worker`).
     """
 
-    def __init__(self, path: Path) -> None:
-        import torch
-        from transformers import AutoModelForMultimodalLM, AutoProcessor, CompileConfig, StaticCache
-        from transformers.models.qwen3_asr.processing_qwen3_asr import LANGUAGE_CODE_TO_NAME
+    def __init__(self, path: Path, vad_path: Path, languages: list[str]) -> None:
+        import onnx_asr
+        import onnxruntime as ort
 
-        self.torch = torch
-        self.languages = set(LANGUAGE_CODE_TO_NAME)
-        self.processor = AutoProcessor.from_pretrained(path)
-        self.model = AutoModelForMultimodalLM.from_pretrained(
-            path, dtype=torch.bfloat16).to("cuda").eval()
-        self.cache = StaticCache(config=self.model.config.get_text_config(),
-                                 max_cache_len=CACHE_TOKENS)
-        self.compile = CompileConfig(fullgraph=False, dynamic=False, mode="reduce-overhead")
+        ort.preload_dlls()   # CUDA and cuDNN come from pip wheels; load them before the first session
+        self.languages = languages
+        vad = onnx_asr.load_vad("silero", vad_path, providers=["CPUExecutionProvider"])
+        self.plain = onnx_asr.load_model(
+            "nemo-canary-1b-v2", path=path,
+            # Grow the memory pool only by what is asked for, not in doubling steps.
+            providers=[("CUDAExecutionProvider", {"arena_extend_strategy": "kSameAsRequested"}),
+                       "CPUExecutionProvider"],
+        )
+        self.model = self.plain.with_vad(vad, **CUTS).with_timestamps()
 
     def warmup(self) -> None:
-        """Compile the decoder (~6 s), so the first clip doesn't."""
-        rng = np.random.default_rng(0)
-        for seconds in (1, 5):
-            self.recognize(rng.normal(0, 0.01, RATE * seconds).astype(np.float32), None, None)
+        """Allocate the GPU memory now, so the first clip doesn't wait for it.
+        Past the VAD: it would find no speech in the noise and skip the model."""
+        noise = np.random.default_rng(0).normal(0, 0.01, RATE * 5).astype(np.float32)
+        self.plain.recognize(noise, sample_rate=RATE, language=self.languages[0])
 
-    def recognize(self, samples: np.ndarray, language: str | None, context: str | None) -> str:
-        """One piece of at most 28 s at 16 kHz."""
-        torch = self.torch
-        inputs = self.processor.apply_transcription_request(
-            audio=samples, language=language, prompt=context,
-        ).to(self.model.device, self.model.dtype)
-        prompt = inputs["input_ids"].shape[1]
-        with torch.inference_mode():
-            self.cache.reset()
-            out = self.model.generate(
-                **inputs, do_sample=False, past_key_values=self.cache,
-                compile_config=self.compile,
-                max_new_tokens=min(MAX_NEW_TOKENS, CACHE_TOKENS - prompt))
-        return self.processor.decode(out[:, prompt:], return_format="transcription_only")[0]
-
-
-def split_at_pauses(samples: np.ndarray, max_seconds: float = 28.0,
-                    search_seconds: float = 6.0, window: int = 480) -> list[np.ndarray]:
-    """Cut 16 kHz audio into pieces of at most `max_seconds`, each cut at the
-    quietest 30 ms in the last `search_seconds` before the limit, so it falls
-    between words."""
-    pieces, start, limit = [], 0, int(max_seconds * RATE)
-    while len(samples) - start > limit:
-        hi = start + limit
-        lo = hi - int(search_seconds * RATE)
-        frames = samples[lo:hi][: (hi - lo) // window * window].reshape(-1, window)
-        cut = lo + int(np.argmin((frames ** 2).mean(axis=1))) * window + window // 2
-        pieces.append(samples[start:cut])
-        start = cut
-    pieces.append(samples[start:])
-    return pieces
+    def recognize(self, samples: np.ndarray, language: str | None) -> str:
+        """16 kHz audio, in `language`, or else each stretch in the one of
+        `languages` the model is surest of."""
+        langs = [language] if language else self.languages
+        versions = [list(self.model.recognize(samples, sample_rate=RATE, language=lang)) for lang in langs]
+        texts = []
+        for stretch in zip(*versions, strict=True):
+            scores = [float(np.mean(s.logprobs)) if s.logprobs else -np.inf for s in stretch]
+            best = int(np.argmax(scores))
+            log.debug("%.1f-%.1fs: %s", stretch[0].start, stretch[0].end,
+                      {lang: round(sc, 3) for lang, sc in zip(langs, scores, strict=True)})
+            texts.append(stretch[best].text.strip())
+        return " ".join(t for t in texts if t)
 
 
 def decode(data: bytes) -> np.ndarray:
@@ -157,16 +147,15 @@ def health():
 async def transcriptions(
     file: UploadFile,
     language: str = Form(""),
-    prompt: str = Form(""),
+    prompt: str = Form(""),         # accepted and ignored: Canary takes no context
     response_format: str = Form("json"),
     model: str = Form(""),          # OpenAI's; accepted and ignored
 ):
     if response_format not in ("json", "text"):
         raise HTTPException(400, 'response_format: "json" or "text"')
     language = language.strip().lower() or None
-    if language and language not in speech.languages:
-        raise HTTPException(400, f"language: one of {', '.join(sorted(speech.languages))}")
-    context = prompt.strip()[:MAX_PROMPT] or None
+    if language and language not in LANGUAGES:
+        raise HTTPException(400, f"language: one of {', '.join(sorted(LANGUAGES))}")
     if file.size is not None and file.size > MAX_BYTES:
         raise HTTPException(413, f"the clip is over {MAX_BYTES // (1024 * 1024)} MB")
     data = await file.read()
@@ -177,8 +166,7 @@ async def transcriptions(
 
     def recognize() -> str:
         t0 = time.time()
-        texts = (speech.recognize(piece, language, context) or "" for piece in split_at_pauses(samples))
-        text = " ".join(t.strip() for t in texts if t.strip())
+        text = speech.recognize(samples, language)
         log.info("%.1fs audio -> %.2fs: %d chars", len(samples) / RATE, time.time() - t0, len(text))
         return text
 
@@ -193,7 +181,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--host", action="append", help="address to listen on; repeat for more (default 127.0.0.1)")
     ap.add_argument("--port", type=int, default=7861)
-    ap.add_argument("--model", type=Path, required=True, help="the folder holding Qwen3-ASR-1.7B's files")
+    ap.add_argument("--model", type=Path, required=True, help="the folder holding Canary-1B-v2's ONNX files")
+    ap.add_argument("--vad", type=Path, required=True, help="the folder holding Silero VAD's ONNX files")
+    ap.add_argument("--languages", nargs="+", required=True, metavar="CODE",
+                    help="the languages a clip without one may be in, e.g. hu en")
     ap.add_argument("--token-file", required=True, type=Path,
                     help="file holding the bearer token every request must carry")
     args = ap.parse_args()
@@ -201,8 +192,11 @@ def main() -> None:
     token = args.token_file.expanduser().read_text().strip().encode()
     if not token:
         ap.error(f"{args.token_file} is empty")
+    if unknown := sorted(set(args.languages) - LANGUAGES):
+        ap.error(f"Canary does not know {', '.join(unknown)}; it knows {', '.join(sorted(LANGUAGES))}")
+    log.info("languages: %s", ", ".join(args.languages))
     t0 = time.time()
-    speech = worker.submit(Speech, args.model.expanduser()).result()
+    speech = worker.submit(Speech, args.model.expanduser(), args.vad.expanduser(), args.languages).result()
     worker.submit(speech.warmup).result()
     log.info("model loaded and warmed up in %.1fs", time.time() - t0)
     hosts = args.host or ["127.0.0.1"]

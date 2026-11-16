@@ -1,11 +1,11 @@
 [Unit]
-Description=iris-listen: Qwen3-ASR speech to text (server.py)
+Description=iris-listen: Canary-1B-v2 speech to text (server.py)
 # install.sh fills in the placeholders.
 After=default.target
 
 [Service]
 Type=simple
-ExecStart=HERE_DIR/.venv/bin/python HERE_DIR/server.py HOST_ARGS --port LISTEN_PORT --model MODEL_DIR --token-file TOKEN_PATH
+ExecStart=HERE_DIR/.venv/bin/python HERE_DIR/server.py HOST_ARGS --port LISTEN_PORT --model MODELS_DIR/canary-1b-v2 --vad MODELS_DIR/silero-vad --languages LISTEN_LANGUAGES --token-file TOKEN_PATH
 Restart=on-failure
 RestartSec=10
 

@@ -1,6 +1,6 @@
 # iris-listen
 
-Speech to text on your own GPU: [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf)
+Speech to text on your own GPU: [Canary-1B-v2](https://huggingface.co/nvidia/canary-1b-v2)
 behind OpenAI's `POST /v1/audio/transcriptions` and a bearer token. It is the
 ears of [Iris](https://github.com/topics/iris); her voice is
 [iris-voice](https://github.com/p4ulcristian/iris-voice).
@@ -10,7 +10,7 @@ push-to-talk types what it hears.
 ## How it fits
 
 ```
-any program ── Bearer token, a clip (+ language, vocabulary) ──▶ iris-listen (server.py, Qwen3-ASR, GPU)
+any program ── Bearer token, a clip (+ language) ──▶ iris-listen (server.py, Silero VAD + Canary, GPU)
             ◀── {"text": "..."} ────────────────────────────────
 ```
 
@@ -18,15 +18,21 @@ any program ── Bearer token, a clip (+ language, vocabulary) ──▶ iris-
   answer is 401. The token is in `~/.config/iris-listen/token`, made by the
   first install. So the service is safe on any address, with or without a
   proxy in front.
-- **The model**: the best open model for English on the Open ASR Leaderboard
-  (September 2026: 4.31% mean WER). It writes down what was said, never a
-  translation, in 30 languages: ar cs da de el en es fa fi fil fr hi hu id it
-  ja ko mk ms nl pl pt ro ru sv th tr vi yue zh.
-- **Whole clips**: it hears a clip at once, not word by word, so there is no
-  stream. A clip over 28 s is cut at its quietest moments and the pieces'
-  texts joined.
-- **Speed** on an RTX 5060 Ti: about 0.3 s for a 7 s sentence.
-- **Memory**: about 4.6 GB of GPU memory while it runs.
+- **The model**: NVIDIA's Canary-1B-v2 (fp32 ONNX through
+  [onnx-asr](https://github.com/istupakov/onnx-asr)), picked for Hungarian: on
+  FLEURS it has 12.9% WER in Hungarian, against 14.1% for Whisper large-v3,
+  among models that run in 16 GB. It knows 25 European languages: bg cs da de
+  el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk.
+- **The language**: Canary cannot tell which language it hears; told the wrong
+  one, it translates. A clip without a `language` is written out in each of
+  the service's languages (`--languages`, `LISTEN_LANGUAGES`) and the version
+  the model is surest of (highest mean token log-probability) wins. Each
+  stretch of speech is picked on its own, so a clip that switches language
+  between sentences keeps both.
+- **Stretches**: Silero VAD cuts a clip at pauses of 250 ms or more (a stretch
+  is at most 20 s); silence gives `""`. Whole clips, no stream.
+- **Speed** on an RTX 5060 Ti, with two languages: about 0.3 s for a 5 s sentence.
+- **Memory**: about 6 GB of GPU memory while it runs.
 
 ## Install
 
@@ -34,12 +40,14 @@ any program ── Bearer token, a clip (+ language, vocabulary) ──▶ iris-
 git clone https://github.com/p4ulcristian/iris-listen && iris-listen/install.sh
 ```
 
-It makes the token, sets up `.venv` here, downloads the model (3.9 GB, to
-`~/.local/share/iris-listen/models/qwen3-asr-1.7b`, or `LISTEN_MODEL_DIR`) and
+It makes the token, sets up `.venv` here, downloads the models (4 GB, to
+`~/.local/share/iris-listen/models`, or `LISTEN_MODELS`) and
 starts the user service `iris-listen` on `127.0.0.1:7861` (`LISTEN_PORT`).
 `LISTEN_HOSTS="127.0.0.1 <address>"` makes it listen on more addresses, a
 VPN's for a proxy in front; an address that is not up yet is bound anyway and
-answers once it is. `LISTEN_TOKEN_FILE` puts the token somewhere else.
+answers once it is. `LISTEN_LANGUAGES="hu en"` sets the languages a clip
+without one may be in (default `en`). `LISTEN_TOKEN_FILE` puts the token
+somewhere else.
 
 ## API
 
@@ -48,8 +56,8 @@ answers once it is. `LISTEN_TOKEN_FILE` puts the token somewhere else.
 | field | |
 |---|---|
 | `file` | the clip: WAV, FLAC, OGG, MP3, MP4/M4A or WebM (anything FFmpeg reads), any sample rate, up to 25 MB |
-| `language` | optional, e.g. `en`: forces that language; without it the model tells |
-| `prompt` | optional: names and terms the clip may hold ("Omarchy, Postgres"), which the model leans towards |
+| `language` | optional, e.g. `en`: forces that language (speech in another one comes out translated); without it the service picks among its languages |
+| `prompt` | accepted and ignored: Canary takes no context |
 | `response_format` | `json` (default): `{"text": "..."}`; `text`: the text alone |
 | `model` | accepted and ignored, for OpenAI's clients |
 

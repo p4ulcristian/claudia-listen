@@ -1,7 +1,8 @@
-# Installed into .venv by install.sh. torch brings its own CUDA and cuDNN
-# from pip; nothing system wide.
-torch==2.14.0
-transformers==5.17.0
+# Installed into .venv by install.sh. onnxruntime-gpu brings its own CUDA and
+# cuDNN from pip; nothing system wide. server.py reaches into onnx-asr's Canary
+# internals to pick the language, so onnx-asr stays pinned to this version.
+onnx-asr[hub]==0.12.0
+onnxruntime-gpu[cuda,cudnn]==1.32.0
 numpy==2.5.3
 fastapi==0.135.2
 uvicorn==0.42.0
