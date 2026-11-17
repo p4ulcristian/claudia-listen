@@ -71,6 +71,9 @@ MAX_WORD_CHARS = 100
 # language after a 0.3 s pause lost the second language's sentences); a stretch over 20 s is cut
 # anyway (Canary is trained on clips up to 40 s). Each stretch keeps 0.1 s of the quiet around it,
 # so no word loses its first or last sound.
+# Silero's speech chance a frame needs to start a stretch. Its default 0.5 dropped quiet iPad speech:
+# 9 of 87 clips came back empty on 2026-11-17 (the old onnx-asr server: 28 of 853).
+VAD_THRESHOLD = 0.3
 CUTS = {"min_silence_duration_ms": 250, "max_speech_duration_s": 20, "speech_pad_ms": 100}
 
 # Phrase boosting (NeMo GPU-PB) in Canary's beam search. NVIDIA's numbers for Canary: 1.0 a step
@@ -80,6 +83,15 @@ BOOST = {"context_score": 1.0, "depth_scaling": 1.0}
 
 class GpuFull(Exception):
     """The GPU has no memory left even for one stretch: the clip is refused, to be sent again."""
+
+
+def loudest_rms(samples: np.ndarray) -> float:
+    """The loudest 0.1 s of the clip, as RMS (for the log when no speech is found)."""
+    n = RATE // 10
+    if len(samples) < n:
+        return float(np.sqrt(np.mean(samples ** 2))) if len(samples) else 0.0
+    frames = samples[: len(samples) // n * n].reshape(-1, n)
+    return float(np.sqrt((frames ** 2).mean(axis=1)).max())
 
 
 class Speech:
@@ -219,8 +231,10 @@ class Speech:
         from silero_vad import get_speech_timestamps
 
         audio = torch.from_numpy(samples).to("cuda")
-        cuts = get_speech_timestamps(audio, self.vad, sampling_rate=RATE, **CUTS)
+        cuts = get_speech_timestamps(audio, self.vad, sampling_rate=RATE, threshold=VAD_THRESHOLD, **CUTS)
         self.vad.reset_states()
+        if not cuts:
+            log.info("no speech found: loudest %.4f rms over 0.1 s", loudest_rms(samples))
         return [samples[c["start"]:c["end"]] for c in cuts]
 
     def written(self, stretches: list[np.ndarray], langs: list[str], tree, batch: int) -> list[str]:
