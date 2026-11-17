@@ -90,14 +90,19 @@ class Speech:
     """
 
     def __init__(self, path: Path, vad_path: Path, languages: list[str]) -> None:
-        import onnx_asr
         import onnxruntime as ort
 
         ort.preload_dlls()   # CUDA and cuDNN come from pip wheels; load them before the first session
-        self.languages = languages
-        self.vad = onnx_asr.load_vad("silero", vad_path, providers=["CPUExecutionProvider"])
+        self.path, self.vad_path, self.languages = path, vad_path, languages
+        self.load()
+
+    def load(self) -> None:
+        """The model's sessions, made new: their GPU memory pool starts empty."""
+        import onnx_asr
+
+        self.vad = onnx_asr.load_vad("silero", self.vad_path, providers=["CPUExecutionProvider"])
         self.plain = onnx_asr.load_model(
-            "nemo-canary-1b-v2", path=path,
+            "nemo-canary-1b-v2", path=self.path,
             # Grow the memory pool only by what is asked for, not in doubling steps.
             providers=[("CUDAExecutionProvider", {"arena_extend_strategy": "kSameAsRequested"}),
                        "CPUExecutionProvider"],
@@ -114,7 +119,11 @@ class Speech:
     def recognize(self, samples: np.ndarray, language: str | None) -> str:
         """16 kHz audio, in `language`, or else each stretch in the one of
         `languages` the model is surest of. Out of GPU memory: again one
-        stretch at a time (BATCH); still out: GpuFull."""
+        stretch at a time (BATCH); still out: the model is loaded anew and
+        tries once more (onnxruntime's memory pool only grows: every new
+        largest buffer stays in it, so after hours it filled the card,
+        11.2 GB on 2026-11-17; new sessions start with an empty pool);
+        still out: GpuFull."""
         try:
             return self.written(self.model, samples, language)
         except Exception as e:   # onnxruntime's Fail carries no type of its own
@@ -124,9 +133,25 @@ class Speech:
         try:
             return self.written(self.single, samples, language)
         except Exception as e:
+            if not out_of_memory(e):
+                raise
+            log.warning("out of GPU memory one stretch at a time: loading the model anew")
+        self.fresh()
+        try:
+            return self.written(self.model, samples, language)
+        except Exception as e:
             if out_of_memory(e):
                 raise GpuFull() from e
             raise
+
+    def fresh(self) -> None:
+        """Drops the sessions (and their memory pools), then loads them again."""
+        import gc
+
+        self.model = self.single = self.plain = self.vad = None
+        gc.collect()
+        self.load()
+        self.warmup()
 
     def written(self, model, samples: np.ndarray, language: str | None) -> str:
         """The text of 16 kHz audio through one model (see recognize)."""
