@@ -470,6 +470,8 @@ async def transcriptions(
     except GpuFull as exc:
         raise HTTPException(503, "the GPU has no memory left just now: send the clip again") from exc
     raw = " ".join(stretches)
+    if not raw and loudest_rms(samples) > MISSED_RMS:
+        keep_missed(data)
     t1 = time.time()
     text = await cleaner.clean(stretches, list(words)) if clean and cleaner and stretches else raw
     log.info("%.1fs audio, %d words listed: asr %.2fs, cleanup %.2fs, %d -> %d chars",
@@ -477,6 +479,21 @@ async def transcriptions(
     if response_format == "text":
         return PlainTextResponse(text)
     return JSONResponse({"text": text, "raw": raw})
+
+
+MISSED_RMS = 0.01   # louder than room noise: a clip this loud that gave no text was probably speech
+MISSED_KEEP = 20
+
+
+def keep_missed(data: bytes) -> None:
+    """A loud clip that gave no text, kept as sent (the newest MISSED_KEEP) in the data folder's
+    missed/, to replay and see why."""
+    folder = vocabulary.folder.parent / "missed"
+    folder.mkdir(exist_ok=True)
+    (folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}.audio").write_bytes(data)
+    for old in sorted(folder.glob("*.audio"))[:-MISSED_KEEP]:
+        old.unlink()
+    log.info("kept the missed clip in %s", folder)
 
 
 async def idle_watch() -> None:
