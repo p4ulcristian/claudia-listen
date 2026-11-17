@@ -1,0 +1,16 @@
+[Unit]
+Description=iris-listen cleanup: llama-server with Gemma 4 E4B (CUDA), on localhost only
+# install.sh fills in the placeholders. A fixed context (-c) and one slot (-np 1) keep its GPU
+# memory fixed; after IDLE_SECONDS without a request it unloads the model and loads it again on
+# the next one.
+After=default.target
+
+[Service]
+Type=simple
+Environment=LD_LIBRARY_PATH=LLAMA_DIR
+ExecStart=LLAMA_DIR/llama-server -m MODELS_DIR/gemma/gemma-4-E4B-it-Q4_K_M.gguf --host 127.0.0.1 --port CLEANUP_PORT -c 4096 -np 1 -ngl 99 --fit off -fa on --cache-ram 0 --reasoning off --sleep-idle-seconds IDLE_SECONDS --api-key-file CLEANUP_KEY_PATH
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
