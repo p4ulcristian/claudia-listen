@@ -267,7 +267,11 @@ class Speech:
             versions = [[self.best(h) for h in found[k * n:(k + 1) * n]] for k in range(len(langs))]
         texts = []
         for stretch in zip(*versions, strict=True):
-            best = max(range(len(langs)), key=lambda k: stretch[k][1])
+            # An empty version scores per token as well as any (no tokens to lose on), so it
+            # could beat the real text: a version with words wins over one without.
+            best = max(range(len(langs)), key=lambda k: (bool(stretch[k][0]), stretch[k][1]))
+            if not stretch[best][0]:
+                log.info("stretch heard as nothing in %s", "/".join(langs))
             log.debug("stretch: %s", {lang: round(v[1], 3) for lang, v in zip(langs, stretch, strict=True)})
             texts.append(stretch[best][0])
         return texts
