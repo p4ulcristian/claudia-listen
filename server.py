@@ -1,17 +1,16 @@
-"""iris-listen: speech to finished text on your own GPU. Canary-1B-v2 hears, each person's own
-word list steers it, a small local language model cleans the text up; behind OpenAI's
+"""iris-listen: English speech to finished text on your own GPU. Musci-ASR-qwen-1019 hears, each
+person's own word list steers it, a small local language model cleans the text up; behind OpenAI's
 transcription API.
 
     POST /v1/audio/transcriptions   multipart form → {"text": cleaned, "raw": heard}
         file             the clip: WAV, FLAC, OGG, MP3, MP4/M4A or WebM (what browsers record;
                          anything FFmpeg reads), any rate, mono or not
-        language         optional, e.g. "en": forces that language; without it each stretch of
-                         speech is written out in each of --languages and the one the model is
-                         surest of wins
+        language         optional: "en" or none; any other is refused (400): English only
         speaker          optional: whose word list steers the model and the cleanup (an opaque
                          string, e.g. a sign-in email); none = no list
         cleanup          optional, "false" skips the cleanup: then text == raw
-        prompt           accepted and ignored: Canary takes no context
+        prompt           optional: names and terms, comma separated, the model leans towards
+                         (with the speaker's word list)
         response_format  "json" (default) or "text" (the cleaned text alone)
         model            accepted and ignored (OpenAI's clients send it)
     GET  /v1/vocabulary/{speaker}   → {"words": [...]}  ([] for a speaker never seen)
@@ -23,11 +22,11 @@ answer is 401. So it is safe on any address, behind a proxy or not.
 
 Run it with this folder's venv:  .venv/bin/python server.py --token-file <file> ...
 It listens on 127.0.0.1 by default. Each --host adds an address; one that is not up yet (a
-VPN's) is bound anyway and starts answering when it comes up.
+VPN's) is bound anyway and starts answering when it comes up. A new copy started while the old
+one runs loads its model first, then shares the port with it (SO_REUSEPORT), so stopping the old
+one loses no clip.
 
-Canary has no language detection: told a language, it writes in that language, and told the
-wrong one it translates. So a forced language must be the one spoken. Silero VAD cuts each clip
-into stretches of speech at its pauses; silence gives "". One clip at a time; others wait.
+Silero VAD finds the speech in each clip; silence gives "". One clip at a time; others wait.
 """
 
 from __future__ import annotations
@@ -35,6 +34,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import errno
 import gc
 import hashlib
 import io
@@ -61,28 +61,24 @@ log = logging.getLogger("iris-listen")
 
 RATE = 16000
 MAX_BYTES = 25 * 1024 * 1024   # OpenAI's limit too
-# The 25 languages Canary-1B-v2 is trained on (its model card).
-LANGUAGES = frozenset("bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk".split())
 MAX_WORDS = 1000           # per speaker
 MAX_WORD_CHARS = 100
 
-# Where a clip is cut into stretches of speech (Silero VAD): at a pause of at least 250 ms, so a
-# stretch is a sentence or less and its language is picked on its own (with 500 ms, a switch of
-# language after a 0.3 s pause lost the second language's sentences); a stretch over 20 s is cut
-# anyway (Canary is trained on clips up to 40 s). Each stretch keeps 0.1 s of the quiet around it,
-# so no word loses its first or last sound.
+# Where Silero VAD finds speech: a stretch ends at a pause of at least 250 ms and is cut anyway at
+# 20 s; each keeps 0.1 s of the quiet around it, so no word loses its first or last sound.
 # Silero's speech chance a frame needs to start a stretch. Its default 0.5 dropped quiet iPad speech:
 # 9 of 87 clips came back empty on 2026-11-17 (the old onnx-asr server: 28 of 853).
 VAD_THRESHOLD = 0.3
 CUTS = {"min_silence_duration_ms": 250, "max_speech_duration_s": 20, "speech_pad_ms": 100}
-
-# Phrase boosting (NeMo GPU-PB) in Canary's beam search. NVIDIA's numbers for Canary: 1.0 a step
-# along a phrase, no extra weight for depth.
-BOOST = {"context_score": 1.0, "depth_scaling": 1.0}
+# Stretches next to each other are heard together, up to this much audio from the first one's start
+# to the last one's end: the model hears whole sentences with what came before, and no silence.
+CHUNK_SECONDS = 30
+# Room for the text: English speech is about 3 words, 4 tokens a second; twice that and a margin.
+TOKENS_PER_SECOND = 8
 
 
 class GpuFull(Exception):
-    """The GPU has no memory left even for one stretch: the clip is refused, to be sent again."""
+    """The GPU has no memory left even for one chunk: the clip is refused, to be sent again."""
 
 
 def loudest_rms(samples: np.ndarray) -> float:
@@ -94,72 +90,46 @@ def loudest_rms(samples: np.ndarray) -> float:
     return float(np.sqrt((frames ** 2).mean(axis=1)).max())
 
 
-class Speech:
-    """Canary-1B-v2 (NeMo, bf16) on the GPU, behind Silero VAD (on the GPU too).
+def chunked(cuts: list[dict]) -> list[tuple[int, int]]:
+    """Silero's stretches of speech joined into (start, end) chunks of at most CHUNK_SECONDS."""
+    chunks = []
+    for c in cuts:
+        if chunks and c["end"] - chunks[-1][0] <= CHUNK_SECONDS * RATE:
+            chunks[-1] = (chunks[-1][0], c["end"])
+        else:
+            chunks.append((c["start"], c["end"]))
+    return chunks
 
-    Decoding is beam search with NeMo's fusion models: a speaker's word list is a prepared
-    boosting tree (GPUBoostingTreeModel), built once per list and cached, and each request puts
-    its speaker's tree into the beam search's `fusion_models` (none for no speaker), so switching
-    speakers costs nothing. Canary has no language detection, so with several `languages` each
-    stretch is written out in every one and the version with the highest score per token wins:
-    the language spoken scores far above a translation. Picking per stretch keeps both languages
-    of a clip that switches between them.
+
+class Speech:
+    """Musci-ASR-qwen-1019 (a Qwen3-ASR-1.7B fine-tune for English; transformers, bf16) on the GPU,
+    behind Silero VAD (on the GPU too).
+
+    English only: the language is set in the prompt, so the model never guesses it. A clip's context
+    (the speaker's word list and the caller's prompt) is the system prompt, which Qwen3-ASR leans
+    towards for names and terms. Silero finds the speech; chunks of it go through the model in batches.
 
     After `idle` seconds without a clip the model is parked in RAM and its GPU memory given back;
     the next clip brings it back (a second or two). Every call runs on the one model thread.
     """
 
-    def __init__(self, path: Path, languages: list[str], beam: int, batch: int, alpha: float,
-                 idle: float) -> None:
-        self.path, self.languages, self.beam, self.batch, self.alpha = path, languages, beam, batch, alpha
-        self.idle = idle
-        self.trees: dict[tuple[str, ...], object] = {}   # word list → its boosting tree
-        self.prompts: dict = {}                            # language → Canary's prompt tokens
+    def __init__(self, path: Path, batch: int, idle: float) -> None:
+        self.path, self.batch, self.idle = path, batch, idle
         self.state = "loading"
         self.last = time.monotonic()
         self.load()
 
     def load(self) -> None:
         import torch
-        from nemo.collections.asr.models import EncDecMultiTaskModel
-        from omegaconf import open_dict
         from silero_vad import load_silero_vad
+        from transformers import Qwen3ASRForConditionalGeneration, Qwen3ASRProcessor
 
-        cfg = EncDecMultiTaskModel.restore_from(str(self.path), return_config=True)
-        with open_dict(cfg):
-            cfg.restore_timestamps_model = False   # a CTC model for word times: not used here
-        model = EncDecMultiTaskModel.restore_from(str(self.path), override_config_path=cfg, map_location="cpu")
-        model.eval()
-        for part in (model.encoder, model.transf_decoder, model.log_softmax):
-            part.to(torch.bfloat16)
-        self.model = model.to("cuda")
-        decoding = model.cfg.decoding
-        with open_dict(decoding):
-            decoding.strategy = "beam"
-            decoding.beam.beam_size = self.beam
-            decoding.beam.return_best_hypothesis = False   # the scores pick the language
-            # A placeholder list, so NeMo builds the beam search that takes fusion models;
-            # each request then sets its own (or none).
-            decoding.beam.boosting_tree = {"key_phrases_list": ["Iris"], **BOOST}
-            decoding.beam.boosting_tree_alpha = self.alpha
-        model.change_decoding_strategy(decoding)
-        self.search = model.decoding.decoding.beam_search
+        # Its defaults pad a batch on the left, so every answer starts at the same place.
+        self.processor = Qwen3ASRProcessor.from_pretrained(self.path)
+        self.model = Qwen3ASRForConditionalGeneration.from_pretrained(
+            self.path, dtype=torch.bfloat16, attn_implementation="sdpa").to("cuda").eval()
         self.vad = load_silero_vad().to("cuda")
         self.state = "gpu"
-
-    def tree(self, words: tuple[str, ...]):
-        """The boosting tree for a word list, built on first use and kept."""
-        from nemo.collections.asr.parts.context_biasing import BoostingTreeModelConfig, GPUBoostingTreeModel
-
-        if words not in self.trees:
-            t0 = time.time()
-            cfg = BoostingTreeModelConfig(key_phrases_list=list(words), **BOOST)
-            self.trees[words] = GPUBoostingTreeModel.from_config(cfg, tokenizer=self.model.tokenizer)
-            log.info("boosting tree for %d words built in %.2fs", len(words), time.time() - t0)
-        return self.trees[words]
-
-    def forget(self, words: tuple[str, ...]) -> None:
-        self.trees.pop(words, None)
 
     def wake(self) -> None:
         import torch
@@ -168,7 +138,6 @@ class Speech:
             t0 = time.time()
             self.model.to("cuda")
             self.vad.to("cuda")
-            self.prompts = {}
             self.state = "gpu"
             log.info("model back on the GPU in %.1fs", time.time() - t0)
         self.last = time.monotonic()
@@ -182,37 +151,33 @@ class Speech:
             return
         self.model.to("cpu")
         self.vad.to("cpu")
-        for tree in self.trees.values():
-            tree.to("cpu")
         gc.collect()
         torch.cuda.empty_cache()
         self.state = "ram"
         log.info("idle: model parked in RAM, GPU memory given back")
 
     def warmup(self) -> None:
-        """Run the model once, so the first clip doesn't wait for kernels to load."""
+        """Run the model once, with and without context, so the first clip doesn't wait for kernels."""
         noise = np.random.default_rng(0).normal(0, 0.01, RATE * 3).astype(np.float32)
-        self.written([noise], self.languages, self.tree(("Iris",)), 1)
-        self.written([noise], self.languages, None, 1)
+        self.written([noise], "", 1)
+        self.written([noise], "Iris", 1)
         self.done()
 
-    def recognize(self, samples: np.ndarray, language: str | None, words: tuple[str, ...]) -> list[str]:
-        """16 kHz audio → the text of each stretch of speech. Out of GPU memory: the cache is
-        given back and the stretches go again one at a time; still out: GpuFull."""
+    def recognize(self, samples: np.ndarray, context: str) -> list[str]:
+        """16 kHz audio → the text of each chunk of speech. Out of GPU memory: the cache is given
+        back and the chunks go again one at a time; still out: GpuFull."""
         import torch
 
         self.wake()
         try:
-            stretches = self.stretches(samples)
-            if not stretches:
+            chunks = self.chunks(samples)
+            if not chunks:
                 return []
-            tree = self.tree(words) if words else None
-            langs = [language] if language else self.languages
             for batch in (self.batch, 1):
                 try:
-                    return self.written(stretches, langs, tree, batch)
+                    return self.written(chunks, context, batch)
                 except torch.OutOfMemoryError:
-                    log.warning("out of GPU memory with %d stretches at a time", batch)
+                    log.warning("out of GPU memory with %d chunks at a time", batch)
                     gc.collect()
                     torch.cuda.empty_cache()
             raise GpuFull()
@@ -226,7 +191,7 @@ class Speech:
         gc.collect()
         torch.cuda.empty_cache()
 
-    def stretches(self, samples: np.ndarray) -> list[np.ndarray]:
+    def chunks(self, samples: np.ndarray) -> list[np.ndarray]:
         import torch
         from silero_vad import get_speech_timestamps
 
@@ -235,64 +200,28 @@ class Speech:
         self.vad.reset_states()
         if not cuts:
             log.info("no speech found: loudest %.4f rms over 0.1 s", loudest_rms(samples))
-        return [samples[c["start"]:c["end"]] for c in cuts]
+        return [samples[start:end] for start, end in chunked(cuts)]
 
-    def written(self, stretches: list[np.ndarray], langs: list[str], tree, batch: int) -> list[str]:
+    def written(self, chunks: list[np.ndarray], context: str, batch: int) -> list[str]:
         texts = []
-        for i in range(0, len(stretches), batch):
-            texts += self.batch_written(stretches[i:i + batch], langs, tree)
+        for i in range(0, len(chunks), batch):
+            texts += self.batch_written(chunks[i:i + batch], context)
         return [t for t in texts if t]
 
-    def batch_written(self, stretches: list[np.ndarray], langs: list[str], tree) -> list[str]:
-        """Some stretches through the encoder once, then through the decoder in each language;
-        per stretch the version with the highest score per token wins. Straight through the
-        model, not NeMo's transcribe(), which sets up a data loader and runs the encoder again
-        for every call."""
+    def batch_written(self, chunks: list[np.ndarray], context: str) -> list[str]:
+        """Some chunks through the model at once; greedy decoding."""
         import torch
 
-        self.search.fusion_models = [tree] if tree is not None else []
-        self.search.fusion_models_alpha = [self.alpha] if tree is not None else []
-        lens = torch.tensor([len(s) for s in stretches], device="cuda")
-        audio = torch.zeros(len(stretches), int(lens.max()), device="cuda")
-        for k, s in enumerate(stretches):
-            audio[k, :len(s)] = torch.from_numpy(s)
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            _, _, states, mask = self.model.forward(input_signal=audio, input_signal_length=lens)
-            # All languages in one batch: the beam search's cost is its steps, not their width.
-            n = len(stretches)
-            found = self.model.decoding.decode_predictions_tensor(
-                encoder_hidden_states=states.repeat(len(langs), 1, 1), encoder_input_mask=mask.repeat(len(langs), 1),
-                decoder_input_ids=torch.cat([self.prompt(lang).repeat(n, 1) for lang in langs]),
-                return_hypotheses=True)
-            versions = [[self.best(h) for h in found[k * n:(k + 1) * n]] for k in range(len(langs))]
-        texts = []
-        for stretch in zip(*versions, strict=True):
-            # An empty version scores per token as well as any (no tokens to lose on), so it
-            # could beat the real text: a version with words wins over one without.
-            best = max(range(len(langs)), key=lambda k: (bool(stretch[k][0]), stretch[k][1]))
-            if not stretch[best][0]:
-                log.info("stretch heard as nothing in %s", "/".join(langs))
-            log.debug("stretch: %s", {lang: round(v[1], 3) for lang, v in zip(langs, stretch, strict=True)})
-            texts.append(stretch[best][0])
-        return texts
-
-    @staticmethod
-    def best(nbest) -> tuple[str, float]:
-        """The best hypothesis of a beam: its text and its score per token."""
-        hyps = nbest if isinstance(nbest, list) else getattr(nbest, "n_best_hypotheses", [nbest])
-        h = max(hyps, key=lambda h: float(h.score))
-        return h.text.strip(), float(h.score) / max(1, len(h.y_sequence))
-
-    def prompt(self, lang: str):
-        """Canary's prompt for writing out speech in `lang` as it is spoken, with punctuation
-        and capitals (its other slots at their defaults); made once per language."""
-        if lang not in self.prompts:
-            turns = self.model.prompt.get_default_dialog_slots()
-            for turn in turns:
-                if turn["role"] == "user":
-                    turn["slots"] = {**turn["slots"], "source_lang": lang, "target_lang": lang, "pnc": "yes"}
-            self.prompts[lang] = self.model.prompt.encode_dialog(turns=turns)["context_ids"].unsqueeze(0).to("cuda")
-        return self.prompts[lang]
+        n = len(chunks)
+        inputs = self.processor.apply_transcription_request(
+            list(chunks), language=["en"] * n, prompt=[context] * n if context else None,
+        ).to("cuda", torch.bfloat16)
+        longest = max(len(c) for c in chunks) / RATE
+        with torch.inference_mode():
+            out = self.model.generate(**inputs, do_sample=False,
+                                      max_new_tokens=int(longest * TOKENS_PER_SECOND) + 32)
+        answers = out[:, inputs["input_ids"].shape[1]:]
+        return [self.processor.decode(a, skip_special_tokens=True).strip() for a in answers]
 
 
 class Vocabulary:
@@ -415,7 +344,7 @@ async def on_model(fn, *args):
 @app.get("/health")
 async def health():
     memory = await on_model(gpu)
-    models = {"asr": {"name": speech.path.stem, "state": speech.state, "boosting_trees": len(speech.trees)},
+    models = {"asr": {"name": speech.path.name, "state": speech.state},
               "cleanup": await cleaner.health() if cleaner else {"state": "off"}}
     return JSONResponse({"ok": True, "gpu": memory, "models": models})
 
@@ -427,14 +356,8 @@ def get_vocabulary(speaker: str):
 
 @app.put("/v1/vocabulary/{speaker}")
 async def put_vocabulary(speaker: str, body: dict = Body(...)):
-    speaker = speaker_of(speaker)
     words = tidy(body.get("words"))
-    old = tuple(vocabulary.get(speaker))
-    vocabulary.put(speaker, words)
-    if words:   # built now, so the speaker's next clip doesn't wait for it
-        await on_model(speech.tree, tuple(words))
-    if old and old != tuple(words):
-        await on_model(speech.forget, old)
+    vocabulary.put(speaker_of(speaker), words)
     return JSONResponse({"words": words})
 
 
@@ -444,18 +367,18 @@ async def transcriptions(
     language: str = Form(""),
     speaker: str = Form(""),
     cleanup: str = Form("true"),
-    prompt: str = Form(""),         # accepted and ignored: Canary takes no context
+    prompt: str = Form(""),
     response_format: str = Form("json"),
     model: str = Form(""),          # OpenAI's; accepted and ignored
 ):
     if response_format not in ("json", "text"):
         raise HTTPException(400, 'response_format: "json" or "text"')
-    language = language.strip().lower() or None
-    if language and language not in LANGUAGES:
-        raise HTTPException(400, f"language: one of {', '.join(sorted(LANGUAGES))}")
+    if language.strip().lower() not in ("", "en"):
+        raise HTTPException(400, 'language: "en" or none (English only)')
     clean = cleanup.strip().lower() not in ("false", "0", "no", "off")
     speaker = speaker_of(speaker)
-    words = tuple(vocabulary.get(speaker)) if speaker else ()
+    words = vocabulary.get(speaker) if speaker else []
+    context = ", ".join(w for w in (*words, prompt.strip()) if w)
     if file.size is not None and file.size > MAX_BYTES:
         raise HTTPException(413, f"the clip is over {MAX_BYTES // (1024 * 1024)} MB")
     data = await file.read()
@@ -466,14 +389,14 @@ async def transcriptions(
 
     t0 = time.time()
     try:
-        stretches = await on_model(speech.recognize, samples, language, words) if len(samples) else []
+        chunks = await on_model(speech.recognize, samples, context) if len(samples) else []
     except GpuFull as exc:
         raise HTTPException(503, "the GPU has no memory left just now: send the clip again") from exc
-    raw = " ".join(stretches)
+    raw = " ".join(chunks)
     if not raw and loudest_rms(samples) > MISSED_RMS:
         keep_missed(data)
     t1 = time.time()
-    text = await cleaner.clean(stretches, list(words)) if clean and cleaner and stretches else raw
+    text = await cleaner.clean(chunks, words) if clean and cleaner and chunks else raw
     log.info("%.1fs audio, %d words listed: asr %.2fs, cleanup %.2fs, %d -> %d chars",
              len(samples) / RATE, len(words), t1 - t0, time.time() - t1, len(raw), len(text))
     if response_format == "text":
@@ -510,20 +433,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--host", action="append", help="address to listen on; repeat for more (default 127.0.0.1)")
     ap.add_argument("--port", type=int, default=7862)
-    ap.add_argument("--model", type=Path, required=True, help="Canary-1B-v2's .nemo file")
-    ap.add_argument("--languages", nargs="+", required=True, metavar="CODE",
-                    help="the languages a clip without one may be in, e.g. hu en")
+    ap.add_argument("--model", type=Path, required=True, help="Musci-ASR-qwen-1019's folder (transformers)")
     ap.add_argument("--token-file", required=True, type=Path,
                     help="file holding the bearer token every request must carry")
     ap.add_argument("--data-dir", required=True, type=Path, help="where the word lists are kept")
     ap.add_argument("--gpu-fraction", type=float, required=True,
                     help="the most of the GPU's memory this process may take, e.g. 0.4; past it a clip "
-                         "goes again one stretch at a time, then gets 503")
+                         "goes again one chunk at a time, then gets 503")
     ap.add_argument("--idle-minutes", type=float, required=True,
                     help="after this long without a clip the model is parked in RAM and its GPU memory freed")
-    ap.add_argument("--beam", type=int, default=4, help="beam size (phrase boosting works in the beam)")
-    ap.add_argument("--batch", type=int, default=4, help="stretches of speech through the model at once")
-    ap.add_argument("--boost", type=float, default=1.0, help="weight of a speaker's word list in the beam search")
+    ap.add_argument("--batch", type=int, default=4, help="chunks of speech through the model at once")
     ap.add_argument("--cleanup-url", help="an OpenAI-style chat server (llama-server), e.g. http://127.0.0.1:7863; "
                                           "without it there is no cleanup and text == raw")
     ap.add_argument("--cleanup-key-file", type=Path, help="file holding that server's API key")
@@ -531,13 +450,11 @@ def main() -> None:
                     help="seconds to wait for the cleanup; past it the raw text goes out")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    for noisy in ("nemo_logger", "nemo", "lightning", "pytorch_lightning", "httpx"):
+    for noisy in ("transformers", "httpx"):
         logging.getLogger(noisy).setLevel(logging.ERROR)
     token = args.token_file.expanduser().read_text().strip().encode()
     if not token:
         ap.error(f"{args.token_file} is empty")
-    if unknown := sorted(set(args.languages) - LANGUAGES):
-        ap.error(f"Canary does not know {', '.join(unknown)}; it knows {', '.join(sorted(LANGUAGES))}")
     if not 0 < args.gpu_fraction <= 1:
         ap.error("--gpu-fraction: above 0, at most 1")
     import torch
@@ -550,24 +467,39 @@ def main() -> None:
     if args.cleanup_url:
         key = args.cleanup_key_file.expanduser().read_text().strip() if args.cleanup_key_file else ""
         cleaner = Cleaner(args.cleanup_url, key, args.cleanup_timeout)
-    log.info("languages: %s; cleanup: %s", ", ".join(args.languages), args.cleanup_url or "off")
+    log.info("English only; cleanup: %s", args.cleanup_url or "off")
     t0 = time.time()
-    speech = worker.submit(Speech, args.model.expanduser(), args.languages, args.beam, args.batch, args.boost,
-                           args.idle_minutes * 60).result()
+    speech = worker.submit(Speech, args.model.expanduser(), args.batch, args.idle_minutes * 60).result()
     worker.submit(speech.warmup).result()
     log.info("model loaded and warmed up in %.1fs", time.time() - t0)
     hosts = args.host or ["127.0.0.1"]
+    sockets = [listen(h, args.port) for h in hosts]
     log.info("ready on %s, port %d", ", ".join(hosts), args.port)
-    uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=[listen(h, args.port) for h in hosts])
+    uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=sockets)
 
 
 def listen(host: str, port: int) -> socket.socket:
-    sock = socket.socket()
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # A VPN address may come up after this service; bind it now and serve it once it does.
-    sock.setsockopt(socket.IPPROTO_IP, getattr(socket, "IP_FREEBIND", 15), 1)   # 15 on Linux
-    sock.bind((host, port))
-    return sock
+    """The listening socket. SO_REUSEPORT lets a new copy of this service bind beside a running one
+    (same user): both answer until the old one stops, so a restart loses no clip. A port held
+    without it (another program) is waited for, after the model is loaded, then taken."""
+    waited = False
+    while True:
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        # A VPN address may come up after this service; bind it now and serve it once it does.
+        sock.setsockopt(socket.IPPROTO_IP, getattr(socket, "IP_FREEBIND", 15), 1)   # 15 on Linux
+        try:
+            sock.bind((host, port))
+            return sock
+        except OSError as exc:
+            sock.close()
+            if exc.errno != errno.EADDRINUSE:
+                raise
+            if not waited:
+                log.info("%s:%d is taken; waiting for it", host, port)
+                waited = True
+            time.sleep(0.02)
 
 
 if __name__ == "__main__":

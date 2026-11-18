@@ -1,5 +1,5 @@
 [Unit]
-Description=iris-listen: Canary-1B-v2 speech to text with word lists and cleanup (server.py)
+Description=iris-listen: Musci-ASR-qwen-1019 English speech to text with word lists and cleanup (server.py)
 # install.sh fills in the placeholders.
 After=default.target
 Wants=CLEANUP_UNIT.service
@@ -9,7 +9,7 @@ After=CLEANUP_UNIT.service
 Type=simple
 WorkingDirectory=HERE_DIR
 Environment=HF_HUB_OFFLINE=1
-ExecStart=HERE_DIR/.venv/bin/python HERE_DIR/server.py HOST_ARGS --port LISTEN_PORT --model MODELS_DIR/canary-1b-v2/canary-1b-v2.nemo --languages LISTEN_LANGUAGES --token-file TOKEN_PATH --data-dir DATA_DIR --gpu-fraction GPU_FRACTION --idle-minutes IDLE_MINUTES --cleanup-url http://127.0.0.1:CLEANUP_PORT --cleanup-key-file CLEANUP_KEY_PATH
+ExecStart=HERE_DIR/.venv/bin/python HERE_DIR/server.py HOST_ARGS --port LISTEN_PORT --model MODELS_DIR/musci-asr-qwen-1019 --token-file TOKEN_PATH --data-dir DATA_DIR --gpu-fraction GPU_FRACTION --idle-minutes IDLE_MINUTES --cleanup-url http://127.0.0.1:CLEANUP_PORT --cleanup-key-file CLEANUP_KEY_PATH
 Restart=on-failure
 RestartSec=10
 

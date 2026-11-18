@@ -1,12 +1,8 @@
 # Installed into .venv by install.sh. torch's CUDA 12.8 wheels bring their own CUDA; nothing
-# system wide. NeMo is pinned to the commit that fixes batched beam search (NVIDIA-NeMo/NeMo#16430:
-# in 3.0.0 a batch of clips with different prompts read each other's prompt, so a Hungarian and
-# an English decode in one batch came out translated). server.py reaches into NeMo's beam search
-# (its fusion models), so NeMo stays pinned.
+# system wide. transformers 5.23 has Qwen3-ASR built in (Musci-ASR-qwen-1019 is one).
 --extra-index-url https://download.pytorch.org/whl/cu128
 torch==2.11.0+cu128
-torchaudio==2.11.0+cu128
-nemo_toolkit[asr] @ git+https://github.com/NVIDIA-NeMo/NeMo@8cd9f1aa80102a5474d11f51a9ce1062a278f5a8
+transformers==5.23.0
 silero-vad==6.2.3
 nvidia-ml-py==13.615.71
 numpy==2.5.5

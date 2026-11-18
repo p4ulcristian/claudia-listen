@@ -1,4 +1,4 @@
-"""The cleanup pass: a small local language model (llama-server) turns what Canary heard into
+"""The cleanup pass: a small local language model (llama-server) turns what the speech model heard into
 finished text: misheard names and terms fixed from the speaker's word list, punctuation and
 capitals, filler words dropped; never translated, never answered.
 

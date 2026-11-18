@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Install iris-listen (Canary-1B-v2 + word lists + cleanup) as two user services. Safe to run again.
+# Install iris-listen (Musci-ASR-qwen-1019, English + word lists + cleanup) as two user services. Safe to run again.
 #
 #   ./install.sh
 #   LISTEN_HOSTS="127.0.0.1 <vpn address>" ./install.sh   # also listen on the VPN
-#   LISTEN_LANGUAGES="hu en" ./install.sh                  # clips without a language: Hungarian or English
 #   LISTEN_UNIT=iris-listen-v2 LISTEN_PORT=7862 ./install.sh   # beside an older iris-listen
 #
-# Needs Linux, an NVIDIA GPU (about 3.5 GB for the speech model, 3.7 GB for the cleanup model),
-# uv, curl and python3. Takes about 20 GB of disk: the venv here (.venv, torch with its CUDA),
+# Needs Linux, an NVIDIA GPU (about 4.5 GB for the speech model, 3.7 GB for the cleanup model),
+# uv, curl and python3. Takes about 15 GB of disk: the venv here (.venv, torch with its CUDA),
 # llama.cpp's CUDA build and the models (LISTEN_MODELS). Every request needs the bearer token in
 # LISTEN_TOKEN_FILE; the first install makes one, and a key for the cleanup server beside it.
 set -euo pipefail
@@ -18,7 +17,6 @@ CLEANUP_PORT=${LISTEN_CLEANUP_PORT:-$((PORT + 100))}
 HOST_ARGS=$(printf -- '--host %s ' ${LISTEN_HOSTS:-127.0.0.1})
 MODELS=${LISTEN_MODELS:-$HOME/.local/share/iris-listen/models}
 DATA=${LISTEN_DATA:-$HOME/.local/share/$UNIT}
-LANGUAGES=${LISTEN_LANGUAGES:-en}
 TOKEN_FILE=${LISTEN_TOKEN_FILE:-$HOME/.config/$UNIT/token}
 CLEANUP_KEY=${LISTEN_CLEANUP_KEY_FILE:-$(dirname "$TOKEN_FILE")/cleanup-key}
 GPU_FRACTION=${LISTEN_GPU_FRACTION:-0.4}
@@ -49,19 +47,20 @@ if [ ! -x "$LLAMA/llama-server" ]; then
   cd "$HERE"
 fi
 
-echo "Fetching Canary-1B-v2 and Gemma 4 E4B (Q4_K_M) into $MODELS (about 11 GB the first time) ..."
+echo "Fetching Musci-ASR-qwen-1019 and Gemma 4 E4B (Q4_K_M) into $MODELS (about 9 GB the first time) ..."
 mkdir -p "$MODELS"
 .venv/bin/python - "$MODELS" <<'PY'
 import sys
-from huggingface_hub import hf_hub_download
-hf_hub_download("nvidia/canary-1b-v2", "canary-1b-v2.nemo", local_dir=f"{sys.argv[1]}/canary-1b-v2")
+from huggingface_hub import hf_hub_download, snapshot_download
+snapshot_download("Musci-research/Musci-ASR-qwen-1019-hf", revision="90caacb67144e9f105dc1b66964789ae803b6b29",
+                  local_dir=f"{sys.argv[1]}/musci-asr-qwen-1019")
 hf_hub_download("unsloth/gemma-4-E4B-it-GGUF", "gemma-4-E4B-it-Q4_K_M.gguf", local_dir=f"{sys.argv[1]}/gemma")
 PY
 
 mkdir -p ~/.config/systemd/user "$DATA"
 fill() {
   sed -e "s|HERE_DIR|$HERE|g" -e "s|LISTEN_PORT|$PORT|g" -e "s|HOST_ARGS|${HOST_ARGS% }|g" \
-      -e "s|MODELS_DIR|$MODELS|g" -e "s|LISTEN_LANGUAGES|$LANGUAGES|g" -e "s|TOKEN_PATH|$TOKEN_FILE|g" \
+      -e "s|MODELS_DIR|$MODELS|g" -e "s|TOKEN_PATH|$TOKEN_FILE|g" \
       -e "s|DATA_DIR|$DATA|g" -e "s|GPU_FRACTION|$GPU_FRACTION|g" -e "s|IDLE_MINUTES|$IDLE_MINUTES|g" \
       -e "s|IDLE_SECONDS|$((IDLE_MINUTES * 60))|g" -e "s|CLEANUP_PORT|$CLEANUP_PORT|g" \
       -e "s|CLEANUP_KEY_PATH|$CLEANUP_KEY|g" -e "s|CLEANUP_UNIT|$CLEANUP_UNIT|g" -e "s|LLAMA_DIR|$LLAMA|g" "$1"
