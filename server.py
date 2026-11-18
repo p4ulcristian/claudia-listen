@@ -1,4 +1,4 @@
-"""iris-listen: speech to finished text on your own GPU. Musci-ASR-qwen-1019 hears, each
+"""claudia-listen: speech to finished text on your own GPU. Musci-ASR-qwen-1019 hears, each
 person's own word list steers it, a small local language model cleans the text up; behind OpenAI's
 transcription API.
 
@@ -58,7 +58,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from cleanup import Cleaner
 
-log = logging.getLogger("iris-listen")
+log = logging.getLogger("claudia-listen")
 
 RATE = 16000
 MAX_BYTES = 25 * 1024 * 1024   # OpenAI's limit too
@@ -76,6 +76,7 @@ CUTS = {"min_silence_duration_ms": 250, "max_speech_duration_s": 20, "speech_pad
 CHUNK_SECONDS = 30
 # Room for the text: English speech is about 3 words, 4 tokens a second; twice that and a margin.
 TOKENS_PER_SECOND = 8
+WARMUP_CONTEXT_WORDS = 300   # longer than a word list plus a caller's prompt
 
 
 class GpuFull(Exception):
@@ -143,11 +144,13 @@ class Speech:
             self.vad.to("cuda")
             self.state = "gpu"
             log.info("model back on the GPU in %.1fs", time.time() - t0)
+            self.warmup()
         self.last = time.monotonic()
         torch.cuda.reset_peak_memory_stats()
 
     def park(self) -> None:
-        """Model to RAM, all its GPU memory given back (the CUDA context stays)."""
+        """Model to RAM, all its GPU memory given back, the reserved room too (the CUDA context
+        stays); waking takes the room again."""
         import torch
 
         if self.state != "gpu" or time.monotonic() - self.last < self.idle:
@@ -160,39 +163,36 @@ class Speech:
         log.info("idle: model parked in RAM, GPU memory given back")
 
     def warmup(self) -> None:
-        """Run the model once, with and without context, so the first clip doesn't wait for kernels."""
-        noise = np.random.default_rng(0).normal(0, 0.01, RATE * 3).astype(np.float32)
-        self.written([noise], "en", "", 1)
-        self.written([noise], "en", "Iris", 1)
-        self.done()
+        """Run the model once at the largest size a clip can ask for: `batch` chunks of CHUNK_SECONDS,
+        a long context, every answer as long as allowed. The GPU memory that takes stays reserved by
+        torch for this process (nothing calls empty_cache after a clip), so another program on the
+        GPU can't take the room a clip needs. Stopping the server gives it all back."""
+        import torch
+
+        noise = np.random.default_rng(0).normal(0, 0.01, RATE * CHUNK_SECONDS).astype(np.float32)
+        context = " ".join(["Claudia"] * WARMUP_CONTEXT_WORDS)
+        self.batch_written([noise] * self.batch, "en", context, force_longest=True)
+        self.batch_written([noise], "en", "", force_longest=True)
+        log.info("GPU memory reserved for clips: %.2f GB (in use %.2f GB, peak %.2f GB)",
+                 torch.cuda.memory_reserved() / 1e9, torch.cuda.memory_allocated() / 1e9,
+                 torch.cuda.max_memory_allocated() / 1e9)
 
     def recognize(self, samples: np.ndarray, language: str, context: str) -> list[str]:
-        """16 kHz audio → the text of each chunk of speech. Out of GPU memory: the cache is given
-        back and the chunks go again one at a time; still out: GpuFull."""
+        """16 kHz audio → the text of each chunk of speech. Out of GPU memory (a clip larger than the
+        warm-up): the chunks go again one at a time; still out: GpuFull."""
         import torch
 
         self.wake()
-        try:
-            chunks = self.chunks(samples)
-            if not chunks:
-                return []
-            for batch in (self.batch, 1):
-                try:
-                    return self.written(chunks, language, context, batch)
-                except torch.OutOfMemoryError:
-                    log.warning("out of GPU memory with %d chunks at a time", batch)
-                    gc.collect()
-                    torch.cuda.empty_cache()
-            raise GpuFull()
-        finally:
-            self.done()
-
-    def done(self) -> None:
-        """After every clip: the memory torch kept for reuse goes back to the GPU."""
-        import torch
-
-        gc.collect()
-        torch.cuda.empty_cache()
+        chunks = self.chunks(samples)
+        if not chunks:
+            return []
+        for batch in (self.batch, 1):
+            try:
+                return self.written(chunks, language, context, batch)
+            except torch.OutOfMemoryError:
+                log.warning("out of GPU memory with %d chunks at a time", batch)
+                gc.collect()
+        raise GpuFull()
 
     def chunks(self, samples: np.ndarray) -> list[np.ndarray]:
         import torch
@@ -211,8 +211,10 @@ class Speech:
             texts += self.batch_written(chunks[i:i + batch], language, context)
         return [t for t in texts if t]
 
-    def batch_written(self, chunks: list[np.ndarray], language: str, context: str) -> list[str]:
-        """Some chunks through the model at once; greedy decoding."""
+    def batch_written(self, chunks: list[np.ndarray], language: str, context: str,
+                      force_longest: bool = False) -> list[str]:
+        """Some chunks through the model at once; greedy decoding. `force_longest`: every answer runs
+        to the token limit (the warm-up's largest size)."""
         import torch
 
         n = len(chunks)
@@ -220,9 +222,10 @@ class Speech:
             list(chunks), language=[language] * n, prompt=[context] * n if context else None,
         ).to("cuda", torch.bfloat16)
         longest = max(len(c) for c in chunks) / RATE
+        limit = int(longest * TOKENS_PER_SECOND) + 32
         with torch.inference_mode():
-            out = self.model.generate(**inputs, do_sample=False,
-                                      max_new_tokens=int(longest * TOKENS_PER_SECOND) + 32)
+            out = self.model.generate(**inputs, do_sample=False, max_new_tokens=limit,
+                                      min_new_tokens=limit if force_longest else None)
         answers = out[:, inputs["input_ids"].shape[1]:]
         return [self.processor.decode(a, skip_special_tokens=True).strip() for a in answers]
 
@@ -466,7 +469,7 @@ def main() -> None:
     import torch
 
     if not torch.cuda.is_available():
-        ap.error("no CUDA GPU: iris-listen runs on the GPU only")
+        ap.error("no CUDA GPU: claudia-listen runs on the GPU only")
     torch.cuda.set_per_process_memory_fraction(args.gpu_fraction)
     cap_fraction = args.gpu_fraction
     vocabulary = Vocabulary(args.data_dir.expanduser() / "vocabulary")

@@ -1,19 +1,18 @@
-# iris-listen
+# claudia-listen
 
 Speech to finished text on your own GPU:
 [Musci-ASR-qwen-1019](https://huggingface.co/Musci-research/Musci-ASR-qwen-1019-hf) hears, each
 person's own word list steers it, and a small local language model
 ([Gemma 4 E4B](https://huggingface.co/google/gemma-4-E4B-it)) cleans the text up. Behind OpenAI's
-`POST /v1/audio/transcriptions` and a bearer token. It is the ears of
-[Iris](https://github.com/topics/iris); her voice is
-[iris-voice](https://github.com/p4ulcristian/iris-voice).
+`POST /v1/audio/transcriptions` and a bearer token. It is the dictation of
+[Claudia](https://github.com/p4ulcristian/claudia), and
 [omarchy-dictation](https://github.com/p4ulcristian/omarchy-dictation)'s
 push-to-talk types what it hears.
 
 ## How it fits
 
 ```
-any program ── Bearer token, a clip (+ language, speaker) ──▶ iris-listen (server.py: Silero VAD + Musci, GPU)
+any program ── Bearer token, a clip (+ language, speaker) ──▶ claudia-listen (server.py: Silero VAD + Musci, GPU)
                                                                    │  the speaker's words
                                                                    ▼
                                                               llama-server (Gemma 4 E4B, GPU, localhost)
@@ -21,8 +20,8 @@ any program ── Bearer token, a clip (+ language, speaker) ──▶ iris-lis
 ```
 
 - **The token**: every request needs `Authorization: Bearer <token>`, or the answer is 401. The
-  first install makes one (`~/.config/iris-listen/token`), and a second key that only
-  iris-listen uses to talk to its cleanup server.
+  first install makes one (`~/.config/claudia-listen/token`), and a second key that only
+  claudia-listen uses to talk to its cleanup server.
 - **Hearing**: Musci-ASR-qwen-1019 through [transformers](https://github.com/huggingface/transformers)
   (bf16), a fine-tune of [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf) for
   English. Picked for English on 2026-11-18: the best open model on Hugging Face's
@@ -46,8 +45,11 @@ any program ── Bearer token, a clip (+ language, speaker) ──▶ iris-lis
   give or take a few words (the guard from omarchy-dictation's fixer), a late reply
   (`--cleanup-timeout`) or a server that is down: the raw text goes out as `text`.
 - **Memory** cannot creep: the speech model takes about 3.9 GB (4.5 GB with the CUDA context),
-  capped by `--gpu-fraction`; torch's cache goes back to the GPU after every clip. After
-  `--idle-minutes` without a clip the model is parked in RAM and comes back in a second or two.
+  capped by `--gpu-fraction`. At start a warm-up runs the largest clip there can be (`--batch`
+  chunks of 30 s, a long word list, answers to the token limit), and torch keeps the memory that
+  took reserved for this process: another program on the GPU can't take the room a clip needs.
+  Stopping the server gives it all back. After `--idle-minutes` without a clip the model is
+  parked in RAM, the reserved room given back too, and both come back in a second or two.
   llama-server has a fixed context (4096 tokens, one slot): 3.7 GB, unloaded after the same idle
   time. Out of GPU memory, a clip goes again one chunk at a time; still out, the answer is 503 and
   the caller sends it again. Never on the CPU.
@@ -60,12 +62,12 @@ any program ── Bearer token, a clip (+ language, speaker) ──▶ iris-lis
 ## Install
 
 ```bash
-git clone https://github.com/p4ulcristian/iris-listen && iris-listen/install.sh
+git clone https://github.com/p4ulcristian/claudia-listen && claudia-listen/install.sh
 ```
 
 It makes the token, sets up `.venv` here, downloads llama.cpp's CUDA build and the models (about
-9 GB, to `~/.local/share/iris-listen/models`, or `LISTEN_MODELS`) and starts two user services:
-`iris-listen` on `127.0.0.1:7861` (`LISTEN_PORT`) and `iris-listen-cleanup` (llama-server) on
+9 GB, to `~/.local/share/claudia-listen/models`, or `LISTEN_MODELS`) and starts two user services:
+`claudia-listen` on `127.0.0.1:7861` (`LISTEN_PORT`) and `claudia-listen-cleanup` (llama-server) on
 `127.0.0.1:7961` (`LISTEN_CLEANUP_PORT`, default the port + 100).
 
 | variable | |
@@ -75,12 +77,12 @@ It makes the token, sets up `.venv` here, downloads llama.cpp's CUDA build and t
 | `LISTEN_GPU_FRACTION` | the most of the GPU's memory the speech model may take (default `0.4`) |
 | `LISTEN_IDLE_MINUTES` | idle time before both models give their GPU memory back (default `15`) |
 | `LISTEN_TOKEN_FILE` | the token somewhere else |
-| `LISTEN_UNIT` | the service's name (default `iris-listen`; the cleanup is `<unit>-cleanup`) |
+| `LISTEN_UNIT` | the service's name (default `claudia-listen`; the cleanup is `<unit>-cleanup`) |
 
-Beside an older iris-listen on the same machine (port 7862, its own token and word lists):
+Beside an older claudia-listen on the same machine (port 7862, its own token and word lists):
 
 ```bash
-LISTEN_UNIT=iris-listen-v2 LISTEN_PORT=7862 \
+LISTEN_UNIT=claudia-listen-v2 LISTEN_PORT=7862 \
   LISTEN_HOSTS="127.0.0.1 <vpn address>" ./install.sh
 ```
 
@@ -108,7 +110,7 @@ cap) and each model's state (`gpu`, or `ram` while parked; the cleanup `up` or `
 One clip at a time; others wait.
 
 ```bash
-T=$(cat ~/.config/iris-listen/token)
+T=$(cat ~/.config/claudia-listen/token)
 curl -s -H "Authorization: Bearer $T" -X PUT -H 'content-type: application/json' \
   -d '{"words": ["WireGuard", "Postgres"]}' http://127.0.0.1:7861/v1/vocabulary/someone
 curl -s -H "Authorization: Bearer $T" -F file=@hello.wav -F speaker=someone \

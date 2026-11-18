@@ -1,5 +1,5 @@
 [Unit]
-Description=iris-listen: Musci-ASR-qwen-1019 speech to text with word lists and cleanup (server.py)
+Description=claudia-listen: Musci-ASR-qwen-1019 speech to text with word lists and cleanup (server.py)
 # install.sh fills in the placeholders.
 After=default.target
 Wants=CLEANUP_UNIT.service

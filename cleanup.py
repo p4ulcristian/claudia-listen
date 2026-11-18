@@ -18,7 +18,7 @@ import re
 
 import httpx
 
-log = logging.getLogger("iris-listen")
+log = logging.getLogger("claudia-listen")
 
 PIECE_CHARS = 1500   # about 400 tokens of transcript per request
 

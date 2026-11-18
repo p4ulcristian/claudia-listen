@@ -1,5 +1,5 @@
 [Unit]
-Description=iris-listen cleanup: llama-server with Gemma 4 E4B (CUDA), on localhost only
+Description=claudia-listen cleanup: llama-server with Gemma 4 E4B (CUDA), on localhost only
 # install.sh fills in the placeholders. A fixed context (-c) and one slot (-np 1) keep its GPU
 # memory fixed; after IDLE_SECONDS without a request it unloads the model and loads it again on
 # the next one.

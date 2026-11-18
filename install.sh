@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Install iris-listen (Musci-ASR-qwen-1019 + word lists + cleanup) as two user services. Safe to run again.
+# Install claudia-listen (Musci-ASR-qwen-1019 + word lists + cleanup) as two user services. Safe to run again.
 #
 #   ./install.sh
 #   LISTEN_HOSTS="127.0.0.1 <vpn address>" ./install.sh   # also listen on the VPN
-#   LISTEN_UNIT=iris-listen-v2 LISTEN_PORT=7862 ./install.sh   # beside an older iris-listen
+#   LISTEN_UNIT=claudia-listen-v2 LISTEN_PORT=7862 ./install.sh   # beside an older claudia-listen
 #
 # Needs Linux, an NVIDIA GPU (about 4.5 GB for the speech model, 3.7 GB for the cleanup model),
 # uv, curl and python3. Takes about 15 GB of disk: the venv here (.venv, torch with its CUDA),
 # llama.cpp's CUDA build and the models (LISTEN_MODELS). Every request needs the bearer token in
 # LISTEN_TOKEN_FILE; the first install makes one, and a key for the cleanup server beside it.
 set -euo pipefail
-UNIT=${LISTEN_UNIT:-iris-listen}
+UNIT=${LISTEN_UNIT:-claudia-listen}
 CLEANUP_UNIT=${LISTEN_CLEANUP_UNIT:-$UNIT-cleanup}
 PORT=${LISTEN_PORT:-7861}
 CLEANUP_PORT=${LISTEN_CLEANUP_PORT:-$((PORT + 100))}
 HOST_ARGS=$(printf -- '--host %s ' ${LISTEN_HOSTS:-127.0.0.1})
-MODELS=${LISTEN_MODELS:-$HOME/.local/share/iris-listen/models}
+MODELS=${LISTEN_MODELS:-$HOME/.local/share/claudia-listen/models}
 DATA=${LISTEN_DATA:-$HOME/.local/share/$UNIT}
 TOKEN_FILE=${LISTEN_TOKEN_FILE:-$HOME/.config/$UNIT/token}
 CLEANUP_KEY=${LISTEN_CLEANUP_KEY_FILE:-$(dirname "$TOKEN_FILE")/cleanup-key}
@@ -65,8 +65,8 @@ fill() {
       -e "s|IDLE_SECONDS|$((IDLE_MINUTES * 60))|g" -e "s|CLEANUP_PORT|$CLEANUP_PORT|g" \
       -e "s|CLEANUP_KEY_PATH|$CLEANUP_KEY|g" -e "s|CLEANUP_UNIT|$CLEANUP_UNIT|g" -e "s|LLAMA_DIR|$LLAMA|g" "$1"
 }
-fill "$HERE/iris-listen-cleanup.service" > ~/.config/systemd/user/"$CLEANUP_UNIT".service
-fill "$HERE/iris-listen.service" > ~/.config/systemd/user/"$UNIT".service
+fill "$HERE/claudia-listen-cleanup.service" > ~/.config/systemd/user/"$CLEANUP_UNIT".service
+fill "$HERE/claudia-listen.service" > ~/.config/systemd/user/"$UNIT".service
 systemctl --user daemon-reload
 systemctl --user enable --now "$CLEANUP_UNIT".service "$UNIT".service
 systemctl --user restart "$CLEANUP_UNIT".service "$UNIT".service
