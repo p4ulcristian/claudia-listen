@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install iris-listen (Musci-ASR-qwen-1019, English + word lists + cleanup) as two user services. Safe to run again.
+# Install iris-listen (Musci-ASR-qwen-1019 + word lists + cleanup) as two user services. Safe to run again.
 #
 #   ./install.sh
 #   LISTEN_HOSTS="127.0.0.1 <vpn address>" ./install.sh   # also listen on the VPN

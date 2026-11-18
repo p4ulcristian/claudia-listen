@@ -1,11 +1,12 @@
-"""iris-listen: English speech to finished text on your own GPU. Musci-ASR-qwen-1019 hears, each
+"""iris-listen: speech to finished text on your own GPU. Musci-ASR-qwen-1019 hears, each
 person's own word list steers it, a small local language model cleans the text up; behind OpenAI's
 transcription API.
 
     POST /v1/audio/transcriptions   multipart form → {"text": cleaned, "raw": heard}
         file             the clip: WAV, FLAC, OGG, MP3, MP4/M4A or WebM (what browsers record;
                          anything FFmpeg reads), any rate, mono or not
-        language         optional: "en" or none; any other is refused (400): English only
+        language         optional, e.g. "hu": the language the clip is in (Qwen3-ASR's 30); none
+                         means "en", and speech in another language is still written in it
         speaker          optional: whose word list steers the model and the cleanup (an opaque
                          string, e.g. a sign-in email); none = no list
         cleanup          optional, "false" skips the cleanup: then text == raw
@@ -105,7 +106,9 @@ class Speech:
     """Musci-ASR-qwen-1019 (a Qwen3-ASR-1.7B fine-tune for English; transformers, bf16) on the GPU,
     behind Silero VAD (on the GPU too).
 
-    English only: the language is set in the prompt, so the model never guesses it. A clip's context
+    The language goes in the prompt (English unless the caller names another). Qwen3-ASR knows 30
+    languages and the fine-tune kept them: told English, it still writes Hungarian speech as
+    Hungarian (seen 2026-11-18; its Hungarian error rate is not measured). A clip's context
     (the speaker's word list and the caller's prompt) is the system prompt, which Qwen3-ASR leans
     towards for names and terms. Silero finds the speech; chunks of it go through the model in batches.
 
@@ -159,11 +162,11 @@ class Speech:
     def warmup(self) -> None:
         """Run the model once, with and without context, so the first clip doesn't wait for kernels."""
         noise = np.random.default_rng(0).normal(0, 0.01, RATE * 3).astype(np.float32)
-        self.written([noise], "", 1)
-        self.written([noise], "Iris", 1)
+        self.written([noise], "en", "", 1)
+        self.written([noise], "en", "Iris", 1)
         self.done()
 
-    def recognize(self, samples: np.ndarray, context: str) -> list[str]:
+    def recognize(self, samples: np.ndarray, language: str, context: str) -> list[str]:
         """16 kHz audio → the text of each chunk of speech. Out of GPU memory: the cache is given
         back and the chunks go again one at a time; still out: GpuFull."""
         import torch
@@ -175,7 +178,7 @@ class Speech:
                 return []
             for batch in (self.batch, 1):
                 try:
-                    return self.written(chunks, context, batch)
+                    return self.written(chunks, language, context, batch)
                 except torch.OutOfMemoryError:
                     log.warning("out of GPU memory with %d chunks at a time", batch)
                     gc.collect()
@@ -202,19 +205,19 @@ class Speech:
             log.info("no speech found: loudest %.4f rms over 0.1 s", loudest_rms(samples))
         return [samples[start:end] for start, end in chunked(cuts)]
 
-    def written(self, chunks: list[np.ndarray], context: str, batch: int) -> list[str]:
+    def written(self, chunks: list[np.ndarray], language: str, context: str, batch: int) -> list[str]:
         texts = []
         for i in range(0, len(chunks), batch):
-            texts += self.batch_written(chunks[i:i + batch], context)
+            texts += self.batch_written(chunks[i:i + batch], language, context)
         return [t for t in texts if t]
 
-    def batch_written(self, chunks: list[np.ndarray], context: str) -> list[str]:
+    def batch_written(self, chunks: list[np.ndarray], language: str, context: str) -> list[str]:
         """Some chunks through the model at once; greedy decoding."""
         import torch
 
         n = len(chunks)
         inputs = self.processor.apply_transcription_request(
-            list(chunks), language=["en"] * n, prompt=[context] * n if context else None,
+            list(chunks), language=[language] * n, prompt=[context] * n if context else None,
         ).to("cuda", torch.bfloat16)
         longest = max(len(c) for c in chunks) / RATE
         with torch.inference_mode():
@@ -373,8 +376,11 @@ async def transcriptions(
 ):
     if response_format not in ("json", "text"):
         raise HTTPException(400, 'response_format: "json" or "text"')
-    if language.strip().lower() not in ("", "en"):
-        raise HTTPException(400, 'language: "en" or none (English only)')
+    from transformers.models.qwen3_asr.processing_qwen3_asr import LANGUAGE_CODE_TO_NAME
+
+    language = language.strip().lower() or "en"
+    if language not in LANGUAGE_CODE_TO_NAME:
+        raise HTTPException(400, f"language: one of {', '.join(sorted(LANGUAGE_CODE_TO_NAME))}")
     clean = cleanup.strip().lower() not in ("false", "0", "no", "off")
     speaker = speaker_of(speaker)
     words = vocabulary.get(speaker) if speaker else []
@@ -389,7 +395,7 @@ async def transcriptions(
 
     t0 = time.time()
     try:
-        chunks = await on_model(speech.recognize, samples, context) if len(samples) else []
+        chunks = await on_model(speech.recognize, samples, language, context) if len(samples) else []
     except GpuFull as exc:
         raise HTTPException(503, "the GPU has no memory left just now: send the clip again") from exc
     raw = " ".join(chunks)
@@ -467,7 +473,7 @@ def main() -> None:
     if args.cleanup_url:
         key = args.cleanup_key_file.expanduser().read_text().strip() if args.cleanup_key_file else ""
         cleaner = Cleaner(args.cleanup_url, key, args.cleanup_timeout)
-    log.info("English only; cleanup: %s", args.cleanup_url or "off")
+    log.info("cleanup: %s", args.cleanup_url or "off")
     t0 = time.time()
     speech = worker.submit(Speech, args.model.expanduser(), args.batch, args.idle_minutes * 60).result()
     worker.submit(speech.warmup).result()

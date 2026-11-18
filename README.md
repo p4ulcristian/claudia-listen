@@ -1,6 +1,6 @@
 # iris-listen
 
-English speech to finished text on your own GPU:
+Speech to finished text on your own GPU:
 [Musci-ASR-qwen-1019](https://huggingface.co/Musci-research/Musci-ASR-qwen-1019-hf) hears, each
 person's own word list steers it, and a small local language model
 ([Gemma 4 E4B](https://huggingface.co/google/gemma-4-E4B-it)) cleans the text up. Behind OpenAI's
@@ -29,9 +29,10 @@ any program ── Bearer token, a clip (+ language, speaker) ──▶ iris-lis
   [Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard) (5.70 %
   average WER, #5 of 69 behind four closed services; Canary-1B-v2 8.43 %, #50). On FLEURS English
   (394 clips) it made 6.32 % errors against Canary-1B-v2's 8.33 %, in 0.77 s a clip against 1.07 s.
-- **English only**: the language is set in the model's prompt, so it never guesses one. A
-  `language` other than `en` is refused (400); speech in another language comes out as whatever
-  English the model makes of it.
+- **Languages**: the language goes in the model's prompt: English unless the caller names another
+  (`language`, one of Qwen3-ASR's 30). The fine-tune kept Qwen3-ASR's languages: told English, it
+  still writes Hungarian speech as Hungarian (seen 2026-11-18). Its Hungarian error rate is not
+  measured.
 - **Chunks**: Silero VAD finds the speech (a stretch ends at a pause of 250 ms or more, at most
   20 s); stretches next to each other are heard together, up to 30 s from the first one's start to
   the last one's end, so the model hears whole sentences with what came before. Silence gives
@@ -90,7 +91,7 @@ LISTEN_UNIT=iris-listen-v2 LISTEN_PORT=7862 \
 | field | |
 |---|---|
 | `file` | the clip: WAV, FLAC, OGG, MP3, MP4/M4A or WebM (anything FFmpeg reads), any sample rate, up to 25 MB |
-| `language` | optional: `en` or none; any other is refused (400): English only |
+| `language` | optional, e.g. `hu`: the clip's language (one of Qwen3-ASR's 30); none means `en`, and speech in another language is still written in it |
 | `speaker` | optional: whose word list steers hearing and cleanup, any string (e.g. a sign-in email); none = no list |
 | `cleanup` | optional, `false` skips the cleanup: then `text` is `raw` |
 | `prompt` | optional: names and terms, comma separated, the model leans towards (with the speaker's word list) |
