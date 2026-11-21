@@ -1,0 +1,100 @@
+{"in": "um so the agent should open the open the routes file and add a a health endpoint", "out": "The agent should open the routes file and add a health endpoint."}
+{"in": "Can you buy a birthday card for Lili? For Kata, I mean, it's Kata's birthday.", "out": "Can you buy a birthday card for Kata? It's Kata's birthday."}
+{"in": "The meeting with the landlord is on Wednesday. Thursday. Sorry, Thursday at five.", "out": "The meeting with the landlord is on Thursday at five."}
+{"in": "scale the workers to four no eight we have a big import tonight", "out": "Scale the workers to eight, we have a big import tonight."}
+{"in": "Let's go to the mountains in July. No, August, July is too hot.", "out": "Let's go to the mountains in August, July is too hot."}
+{"in": "add salt to the list er sugar we have salt", "out": "Add sugar to the list, we have salt."}
+{"in": "Tell the agent to delete the temp files. Actually, tell it to move them to the trash, not delete.", "out": "Tell it to move them to the trash, not delete."}
+{"in": "the school trip costs eighty rather ninety euros with the bus", "out": "The school trip costs ninety euros with the bus."}
+{"in": "I'll send the report on Friday, or no, on Monday, I need the weekend numbers.", "out": "I'll send the report on Monday, I need the weekend numbers."}
+{"in": "check the staging logs i mean the production logs staging is fine", "out": "Check the production logs, staging is fine."}
+{"in": "Uh, we were planning, never mind, order sushi for everyone.", "out": "Order sushi for everyone."}
+{"in": "the the dishwasher is is making that noise again", "out": "The dishwasher is making that noise again."}
+{"in": "So, basically, the, the agent keeps, like, the agent keeps rewriting the whole file.", "out": "The agent keeps rewriting the whole file."}
+{"in": "you know i think we we should call the insurance first", "out": "I think we should call the insurance first."}
+{"in": "well um i mean it's not urgent", "out": "It's not urgent."}
+{"in": "it looks like the the cat likes the new bed", "out": "It looks like the cat likes the new bed."}
+{"in": "I like how fast the new build is.", "out": "I like how fast the new build is."}
+{"in": "okay so like the the wifi is down in the whole building", "out": "The wifi is down in the whole building."}
+{"in": "Okay, I'll ask him.", "out": "Okay, I'll ask him."}
+{"in": "er hmm what was i what was i saying oh yes the invoice is wrong", "out": "What was I saying? Oh yes, the invoice is wrong."}
+{"in": "öö a vonat Győrben nem Tatabányán áll meg", "out": "A vonat Tatabányán áll meg."}
+{"in": "Bencének, bocs, Tomnak küldd el a jelszót.", "out": "Tomnak küldd el a jelszót."}
+{"in": "szóval a hűtőt hétfőn vagyis kedden szállítják", "out": "A hűtőt kedden szállítják."}
+{"in": "inkább gyalog megyek úgyis közel van", "out": "Inkább gyalog megyek, úgyis közel van."}
+{"in": "Két, azaz három kiló krumplit hozz.", "out": "Három kiló krumplit hozz."}
+{"in": "öö a a log fájlok túl nagyok", "out": "A log fájlok túl nagyok."}
+{"in": "na szóval tehát a lényeg az hogy a teszt nem nem fut le", "out": "A lényeg az, hogy a teszt nem fut le."}
+{"in": "Indítsd újra a gépet. Nem, inkább csak jelentkezz ki és be.", "out": "Csak jelentkezz ki és be."}
+{"in": "Mondd meg az ágensnek, hogy a mappát, izé, a fájlt nevezze át.", "out": "Mondd meg az ágensnek, hogy a fájlt nevezze át."}
+{"in": "hát ugye a a szomszéd kutyája megint ugat", "out": "A szomszéd kutyája megint ugat."}
+{"in": "nézd meg a dashboardot um the cpu graph looks weird", "out": "Nézd meg a dashboardot, the CPU graph looks weird."}
+{"in": "So, a vacsora kész, but the kids are still outside.", "out": "A vacsora kész, but the kids are still outside."}
+{"in": "Hívd fel Katát, no, actually, text her, she's in a meeting.", "out": "Text her, she's in a meeting."}
+{"in": "öö the backup finished de a restore még nem ment le", "out": "The backup finished, de a restore még nem ment le."}
+{"in": "A meetinget tegyük át, um, to Thursday. Friday, sorry.", "out": "A meetinget tegyük át to Friday."}
+{"in": "the cake needs two cups of flour no two and a half", "out": "The cake needs two and a half cups of flour."}
+{"in": "can you ask tom to review it or no anna tom is on holiday", "out": "Can you ask Anna to review it? Tom is on holiday."}
+{"in": "We're staying at the hotel by the river. By the park, I mean, the river one was full.", "out": "We're staying at the hotel by the park, the river one was full."}
+{"in": "Merge it now. Wait, no, let's wait until the tests finish.", "out": "Let's wait until the tests finish."}
+{"in": "the doctor's appointment is at nine fifteen sorry nine forty five", "out": "The doctor's appointment is at nine forty five."}
+{"in": "add an index on the email column rather on user id email is already unique", "out": "Add an index on user id, email is already unique."}
+{"in": "Did you see the, did you see the message from school?", "out": "Did you see the message from school?"}
+{"in": "the bike needs a new chain and uh and new brakes", "out": "The bike needs a new chain and new brakes."}
+{"in": "We could, I don't know, we could rent a van for the move.", "out": "We could rent a van for the move."}
+{"in": "Is the parking free on Sundays or do we have to pay?", "out": "Is the parking free on Sundays or do we have to pay?"}
+{"in": "so so the api returns five hundred when the the token is expired", "out": "The API returns five hundred when the token is expired."}
+{"in": "Tell me what do you need for the trip.", "out": "Tell me what you need for the trip."}
+{"in": "I'll be home at seven. Eight, sorry, I have to stop at the shop.", "out": "I'll be home at eight, I have to stop at the shop."}
+{"in": "this soup is very very salty", "out": "This soup is very, very salty."}
+{"in": "um can you can you set a timer for twenty minutes", "out": "Can you set a timer for twenty minutes?"}
+{"in": "Holnap tízkor, vagyis tizenegykor van a fogorvos.", "out": "Holnap tizenegykor van a fogorvos."}
+{"in": "szóval a laptopot a a táskámban hagytam", "out": "A laptopot a táskámban hagytam."}
+{"in": "Lili szerint. A film nyolckor kezdődik.", "out": "Lili szerint a film nyolckor kezdődik."}
+{"in": "na izé a négyes nem a hatos peronról indul", "out": "A hatos peronról indul."}
+{"in": "Ezt a fájlt ne módosítsd. Bocsánat, ezt módosíthatod, a másikat ne.", "out": "Ezt módosíthatod, a másikat ne."}
+{"in": "öö hát nem nem tudom ki hagyta nyitva az ajtót", "out": "Nem tudom, ki hagyta nyitva az ajtót."}
+{"in": "A hétvégén Szegedre, illetve Pécsre megyünk.", "out": "A hétvégén Szegedre, illetve Pécsre megyünk."}
+{"in": "tehát a frissítést péntek este azaz szombat reggel csináljuk", "out": "A frissítést szombat reggel csináljuk."}
+{"in": "Ugye, holnap nincs iskola?", "out": "Ugye holnap nincs iskola?"}
+{"in": "a fürdőszobában bocs a konyhában csöpög a csap", "out": "A konyhában csöpög a csap."}
+{"in": "Okay so, uh, I fixed the login. And, and the logout too.", "out": "I fixed the login and the logout too."}
+{"in": "the movie starts at eight we should leave at seven or no at half seven", "out": "The movie starts at eight, we should leave at half seven."}
+{"in": "Can you check if the, the gas bill came? The water bill, sorry.", "out": "Can you check if the water bill came?"}
+{"in": "i mean honestly the old version was better", "out": "Honestly, the old version was better."}
+{"in": "store the files in s3 scratch that store them on the local disk for now we don't have a bucket", "out": "Store them on the local disk for now, we don't have a bucket."}
+{"in": "No, the other one.", "out": "No, the other one."}
+{"in": "my brother lives in the second no the third building on the left", "out": "My brother lives in the third building on the left."}
+{"in": "Okay, so, the agent finished the refactor. Uh, the tests are green. I'll, I'll review it tonight.", "out": "The agent finished the refactor. The tests are green. I'll review it tonight."}
+{"in": "i want to know why did the price change", "out": "I want to know why the price changed."}
+{"in": "we bought the bread the milk and um the cheese", "out": "We bought the bread, the milk and the cheese."}
+{"in": "Kata wants the purple dress. The pink dress, sorry, purple was last week.", "out": "Kata wants the pink dress, purple was last week."}
+{"in": "hmm the printer is out of paper again", "out": "The printer is out of paper again."}
+{"in": "We need, like, a proper plan for the migration.", "out": "We need a proper plan for the migration."}
+{"in": "the the shop closes at at six on saturdays", "out": "The shop closes at six on Saturdays."}
+{"in": "Do you want to come with us or stay home?", "out": "Do you want to come with us or stay home?"}
+{"in": "er well basically the server is is fine it's the network", "out": "The server is fine, it's the network."}
+{"in": "Set the alarm for six. Half six, I mean.", "out": "Set the alarm for half six."}
+{"in": "so i tried the uh forget it can you restart the router", "out": "Can you restart the router?"}
+{"in": "Ask the agent to add types to the, to the helper functions.", "out": "Ask the agent to add types to the helper functions."}
+{"in": "the flight is at eleven pm i mean am so we leave at eight", "out": "The flight is at eleven am, so we leave at eight."}
+{"in": "öö tom azt mondta hogy kedden nem szerdán jön a szerelő", "out": "Tom azt mondta, hogy szerdán jön a szerelő."}
+{"in": "na szóval a kutyát sétáltasd meg mielőtt elmész", "out": "A kutyát sétáltasd meg, mielőtt elmész."}
+{"in": "A deploy sikeres volt. Vagyis nem, a második szerveren elhasalt.", "out": "A második szerveren elhasalt."}
+{"in": "hát a a gyerekek már nagyon várják a nyarat", "out": "A gyerekek már nagyon várják a nyarat."}
+{"in": "Vegyél kávét, bocs, teát, kávé még van.", "out": "Vegyél teát, kávé még van."}
+{"in": "öö a a memória használat nyolcvan nem kilencven százalék", "out": "A memória használat kilencven százalék."}
+{"in": "Nem tudom, mit mondjak.", "out": "Nem tudom, mit mondjak."}
+{"in": "szóval tehát azt kérem hogy az ágens ne ne commitoljon magától", "out": "Azt kérem, hogy az ágens ne commitoljon magától."}
+{"in": "Tegnap. Elfelejtettem bevinni a csomagot.", "out": "Tegnap elfelejtettem bevinni a csomagot."}
+{"in": "hívd fel a mamát este nem holnap reggel", "out": "Hívd fel a mamát holnap reggel."}
+{"in": "okay so merge the pr de csak ha zöld a ci", "out": "Merge the PR, de csak ha zöld a CI."}
+{"in": "Mondd meg Annának, hogy, uh, we land at six. At seven, sorry.", "out": "Mondd meg Annának, hogy we land at seven."}
+{"in": "hát a parking near the hotel costs twenty euros a day", "out": "The parking near the hotel costs twenty euros a day."}
+{"in": "Töröld a cache-t, um, and then restart the app.", "out": "Töröld a cache-t, and then restart the app."}
+{"in": "öö vegyél tejet oh and also bread", "out": "Vegyél tejet, oh and also bread."}
+{"in": "the restaurant is on the left no on the right after the bridge", "out": "The restaurant is on the right after the bridge."}
+{"in": "So, uh, we, we ran out of disk space on the build server.", "out": "We ran out of disk space on the build server."}
+{"in": "Book the dentist for Lili. For Bence, I mean, Lili went last month.", "out": "Book the dentist for Bence, Lili went last month."}
+{"in": "the the new hire starts on the first not on the fifteenth", "out": "The new hire starts on the first, not on the fifteenth."}
+{"in": "can you water the plants while we're away", "out": "Can you water the plants while we're away?"}

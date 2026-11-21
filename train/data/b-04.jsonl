@@ -1,0 +1,100 @@
+{"in": "we land in uh vienna at six in the morning", "out": "We land in Vienna at six in the morning."}
+{"in": "Can you check if the train is delayed?", "out": "Can you check if the train is delayed?"}
+{"in": "um do we need a visa for turkey", "out": "Do we need a visa for Turkey?"}
+{"in": "Er, I booked the hotel. Near the old town.", "out": "I booked the hotel near the old town."}
+{"in": "the flight was cancelled um and nobody told us fucking airlines", "out": "The flight was cancelled and nobody told us, fucking airlines."}
+{"in": "Yesterday we visit the castle and it was amazing.", "out": "Yesterday we visited the castle and it was amazing."}
+{"in": "would you rather sit by the window or on the aisle", "out": "Would you rather sit by the window or on the aisle?"}
+{"in": "I don't know where is the gate for our flight.", "out": "I don't know where the gate for our flight is."}
+{"in": "um so the view from the room is very very nice", "out": "The view from the room is very very nice."}
+{"in": "Sorry, we missed the bus by two minutes.", "out": "Sorry, we missed the bus by two minutes."}
+{"in": "how far um is the airport from the city center", "out": "How far is the airport from the city center?"}
+{"in": "Uh, pack the chargers and the passports.", "out": "Pack the chargers and the passports."}
+{"in": "we was waiting at the station for two hours", "out": "We were waiting at the station for two hours."}
+{"in": "Yeah, the rental car is ready.", "out": "Yeah, the rental car is ready."}
+{"in": "is breakfast included or do we pay extra", "out": "Is breakfast included or do we pay extra?"}
+{"in": "Find me a cheap flight to Lisbon, um, in May.", "out": "Find me a cheap flight to Lisbon in May."}
+{"in": "er the beach was nice but the water was freezing", "out": "The beach was nice, but the water was freezing."}
+{"in": "Can you tell me how long does the ferry take?", "out": "Can you tell me how long the ferry takes?"}
+{"in": "um so no we're not taking the night bus again", "out": "No, we're not taking the night bus again."}
+{"in": "Wow, look at those mountains.", "out": "Wow, look at those mountains."}
+{"in": "um the hotel wifi doesn't work at all", "out": "The hotel wifi doesn't work at all."}
+{"in": "Our luggage didn't arrived.", "out": "Our luggage didn't arrive."}
+{"in": "er i like it here it's quiet", "out": "I like it here, it's quiet."}
+{"in": "The museum is, um, closed on Mondays.", "out": "The museum is closed on Mondays."}
+{"in": "we should leave at seven. to, um, beat the traffic", "out": "We should leave at seven to beat the traffic."}
+{"in": "What's the best way to get from the airport to the hotel?", "out": "What's the best way to get from the airport to the hotel?"}
+{"in": "er the taxi driver took the long way what a jerk", "out": "The taxi driver took the long way, what a jerk."}
+{"in": "Er, I need to exchange some money before we go.", "out": "I need to exchange some money before we go."}
+{"in": "it's gonna rain all week in london", "out": "It's gonna rain all week in London."}
+{"in": "Uh, do they accept cards or only cash?", "out": "Do they accept cards or only cash?"}
+{"in": "the server went down, uh, while I was on the plane", "out": "The server went down while I was on the plane."}
+{"in": "Can you deploy it, um, while I'm travelling?", "out": "Can you deploy it while I'm travelling?"}
+{"in": "i'll review the PR, er, from the hotel tonight", "out": "I'll review the PR from the hotel tonight."}
+{"in": "Uh, the agent fixed the bug while I was at the airport. Nice.", "out": "The agent fixed the bug while I was at the airport. Nice."}
+{"in": "tell me what did the agent change in the payment code", "out": "Tell me what the agent changed in the payment code."}
+{"in": "Um, the tests are green so you can merge.", "out": "The tests are green, so you can merge."}
+{"in": "refactor the login function and add comments", "out": "Refactor the login function and add comments."}
+{"in": "The new API is, er, much much faster.", "out": "The new API is much much faster."}
+{"in": "why the cache is not working on production", "out": "Why is the cache not working on production?"}
+{"in": "Can you roll back the last deploy?", "out": "Can you roll back the last deploy?"}
+{"in": "I didn't knew that the job runs every hour.", "out": "I didn't know that the job runs every hour."}
+{"in": "the logs are full of warnings no", "out": "The logs are full of warnings, no?"}
+{"in": "Don't push to main. Open a, um, pull request.", "out": "Don't push to main. Open a pull request."}
+{"in": "uh the memory usage is growing. every few minutes", "out": "The memory usage is growing every few minutes."}
+{"in": "Um so that's a damn good fix.", "out": "That's a damn good fix."}
+{"in": "can you add uh a retry when the request fails", "out": "Can you add a retry when the request fails?"}
+{"in": "The agent is stuck in a loop, stop it.", "out": "The agent is stuck in a loop, stop it."}
+{"in": "um so nah leave the old endpoint for now", "out": "Nah, leave the old endpoint for now."}
+{"in": "I don't understand why does it return null.", "out": "I don't understand why it returns null."}
+{"in": "um we should use the queue or the cron job not both", "out": "We should use the queue or the cron job, not both."}
+{"in": "Explain this regex to me.", "out": "Explain this regex to me."}
+{"in": "the database is on a another server", "out": "The database is on another server."}
+{"in": "How long does the full test suite take?", "out": "How long does the full test suite take?"}
+{"in": "um the migration ran fine on staging", "out": "The migration ran fine on staging."}
+{"in": "The error happens, uh, only when the user. Has no email.", "out": "The error happens only when the user has no email."}
+{"in": "hmm i mean it no force push on main", "out": "I mean it, no force push on main."}
+{"in": "This code is a mess, who wrote this crap?", "out": "This code is a mess, who wrote this crap?"}
+{"in": "the hotel checkout is at eleven right", "out": "The hotel checkout is at eleven, right?"}
+{"in": "We arrive late, so we'll eat at the airport.", "out": "We arrive late, so we'll eat at the airport."}
+{"in": "our train leaves from uh platform nine", "out": "Our train leaves from platform nine."}
+{"in": "reggel hatkor szállunk öö le bécsben", "out": "Reggel hatkor szállunk le Bécsben."}
+{"in": "Ööö, megnéznéd, késik-e a vonat?", "out": "Megnéznéd, késik-e a vonat?"}
+{"in": "öö kell vízum törökországba", "out": "Kell vízum Törökországba?"}
+{"in": "Öö, lefoglaltam a szállást. Az óváros mellett.", "out": "Lefoglaltam a szállást az óváros mellett."}
+{"in": "tegnap megnézzük a várat és csodálatos volt", "out": "Tegnap megnéztük a várat, és csodálatos volt."}
+{"in": "Ablak mellé vagy a folyosóra kéred a helyet?", "out": "Ablak mellé vagy a folyosóra kéred a helyet?"}
+{"in": "szóval nem tudom hol van a beszállókapu", "out": "Nem tudom, hol van a beszállókapu."}
+{"in": "A kilátás nagyon nagyon szép a szobából.", "out": "A kilátás nagyon nagyon szép a szobából."}
+{"in": "hmm milyen messze van a reptér a belvárostól", "out": "Milyen messze van a reptér a belvárostól?"}
+{"in": "Um, pakold be a töltőket meg az útleveleket.", "out": "Pakold be a töltőket meg az útleveleket."}
+{"in": "két órát vártunk az állomáson", "out": "Két órát vártunk az állomáson."}
+{"in": "Benne van a reggeli az árban, vagy külön kell fizetni?", "out": "Benne van a reggeli az árban, vagy külön kell fizetni?"}
+{"in": "hm a strand jó volt de a víz jéghideg", "out": "A strand jó volt, de a víz jéghideg."}
+{"in": "Nem, éjszakai busszal többet nem megyünk.", "out": "Nem, éjszakai busszal többet nem megyünk."}
+{"in": "a csomagunk nem érkeztek meg", "out": "A csomagunk nem érkezett meg."}
+{"in": "Jaj, lekéstük a buszt!", "out": "Jaj, lekéstük a buszt!"}
+{"in": "öö szerintem hétkor induljunk hogy ne legyen dugó", "out": "Szerintem hétkor induljunk, hogy ne legyen dugó."}
+{"in": "Hm, a taxis a hosszú úton vitt minket, a rohadék.", "out": "A taxis a hosszú úton vitt minket, a rohadék."}
+{"in": "kártyát is ő elfogadnak vagy csak készpénzt", "out": "Kártyát is elfogadnak, vagy csak készpénzt?"}
+{"in": "A szerver leállt, amíg a repülőn voltam.", "out": "A szerver leállt, amíg a repülőn voltam."}
+{"in": "ne pusholj a mainre nyiss egy pull requestet", "out": "Ne pusholj a mainre, nyiss egy pull requestet."}
+{"in": "Miért nem működik a cache élesben?", "out": "Miért nem működik a cache élesben?"}
+{"in": "az ügynök beragadt egy ciklusba állítsd le", "out": "Az ügynök beragadt egy ciklusba, állítsd le."}
+{"in": "Nem értem, miért ad, izé, vissza nullát.", "out": "Nem értem, miért ad vissza nullát."}
+{"in": "a migráció rendben lefutott", "out": "A migráció rendben lefutott."}
+{"in": "Magyarázd el ezt a regexet.", "out": "Magyarázd el ezt a regexet."}
+{"in": "a adatbázis egy másik szerveren van", "out": "Az adatbázis egy másik szerveren van."}
+{"in": "Ez a kód egy rakás szar.", "out": "Ez a kód egy rakás szar."}
+{"in": "tizenegykor kell kijelentkezni a izé szállodából ugye", "out": "Tizenegykor kell kijelentkezni a szállodából, ugye?"}
+{"in": "Hát, a szállodában egyáltalán nem működik a wifi.", "out": "A szállodában egyáltalán nem működik a wifi."}
+{"in": "öö a flight késik check the new time", "out": "A flight késik, check the new time."}
+{"in": "Lefoglaltam a hotelt, it's near the beach.", "out": "Lefoglaltam a hotelt, it's near the beach."}
+{"in": "hmm can you deploy it amíg utazom", "out": "Can you deploy it, amíg utazom?"}
+{"in": "Öö, the tests are green, mehet a merge.", "out": "The tests are green, mehet a merge."}
+{"in": "hát nézd meg a logokat something is wrong with the cache", "out": "Nézd meg a logokat, something is wrong with the cache."}
+{"in": "The beach volt a legjobb rész.", "out": "The beach volt a legjobb rész."}
+{"in": "um szerintem we should take the earlier train", "out": "Szerintem we should take the earlier train."}
+{"in": "Wow, what a view, öö, ez gyönyörű.", "out": "Wow, what a view, ez gyönyörű."}
+{"in": "nem értem why does it return an empty list", "out": "Nem értem, why it returns an empty list."}
+{"in": "Pakold be a passportokat, we leave at six.", "out": "Pakold be a passportokat, we leave at six."}

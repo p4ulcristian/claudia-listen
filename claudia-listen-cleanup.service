@@ -8,7 +8,7 @@ After=default.target
 [Service]
 Type=simple
 Environment=LD_LIBRARY_PATH=LLAMA_DIR
-ExecStart=LLAMA_DIR/llama-server -m MODELS_DIR/gemma/gemma-4-E4B-it-Q4_K_M.gguf --host 127.0.0.1 --port CLEANUP_PORT -c 4096 -np 1 -ngl 99 --fit off -fa on --cache-ram 0 --reasoning off --sleep-idle-seconds IDLE_SECONDS --api-key-file CLEANUP_KEY_PATH
+ExecStart=LLAMA_DIR/llama-server -m MODELS_DIR/gemma/gemma-4-E4B-it-Q4_K_M.gguf --lora MODELS_DIR/cleanup-lora/cleanup-lora-2026-11-21.gguf --host 127.0.0.1 --port CLEANUP_PORT -c 4096 -np 1 -ngl 99 --fit off -fa on --cache-ram 0 --reasoning off --sleep-idle-seconds IDLE_SECONDS --api-key-file CLEANUP_KEY_PATH
 Restart=on-failure
 RestartSec=10
 

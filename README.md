@@ -39,7 +39,7 @@ any program ── Bearer token, a clip (+ language, speaker) ──▶ claudia-
 - **Word lists**: one per speaker (`GET`/`PUT /v1/vocabulary/<speaker>`). The speaker's words and
   a caller's `prompt` go into the model's system prompt as context, which Qwen3-ASR leans towards
   for names and terms. Write the words as they should be written: capitals count.
-- **Cleanup**: llama-server runs Gemma 4 E4B (Q4_K_M) on localhost. It gets the raw text and the
+- **Cleanup**: llama-server runs Gemma 4 E4B (Q4_K_M) on localhost with a LoRA adapter trained for this job (`train/`: 1,700 messy → clean pairs written by Claude; on 49 held-out cases 44 → 49 right, the adapter adds about 0.08 s). It gets the raw text and the
   speaker's words and returns what the speaker meant to write: it drops filler sounds (uh, um, öö),
   filler words that carry no meaning, repeats, false starts and self-corrections ("Monday, no
   wait, Tuesday" becomes "Tuesday"), fixes grammar mistakes, misheard words from the list,

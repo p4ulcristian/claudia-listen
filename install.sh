@@ -56,6 +56,10 @@ snapshot_download("Musci-research/Musci-ASR-qwen-1019-hf", revision="90caacb6714
                   local_dir=f"{sys.argv[1]}/musci-asr-qwen-1019")
 hf_hub_download("unsloth/gemma-4-E4B-it-GGUF", "gemma-4-E4B-it-Q4_K_M.gguf", local_dir=f"{sys.argv[1]}/gemma")
 PY
+# The cleanup's LoRA adapter (train/: trained on train/data with train/train.py), from this repo's release.
+mkdir -p "$MODELS/cleanup-lora"
+test -s "$MODELS/cleanup-lora/cleanup-lora-2026-11-21.gguf" || curl -fsSL -o "$MODELS/cleanup-lora/cleanup-lora-2026-11-21.gguf" \
+  "https://github.com/p4ulcristian/claudia-listen/releases/download/cleanup-lora-2026-11-21/cleanup-lora-2026-11-21.gguf"
 
 mkdir -p ~/.config/systemd/user "$DATA"
 fill() {

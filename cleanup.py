@@ -95,11 +95,19 @@ def plausible(raw: str, fixed: str) -> bool:
     it or a rewrite."""
     if not fixed:
         return False
-    if len(fixed) > len(raw) * 1.5 + 15 or len(fixed) < len(raw) * 0.5 - 10:
+    if len(fixed) > len(raw) * 1.5 + 15:
+        return False
+    a = _words(raw)
+    b = [w for t in _words(fixed) for part in t.split("_") if part for w in spelled(part)]
+    # Made of the spoken words, a few fixed (a grammar fix, a joined code): a cleanup, however much
+    # shorter ("deploy staging, actually no, deploy main" is "Deploy main."). An answer or a rewrite
+    # brings in words of its own. Numbers written as digits ("1.10.0") count as spoken.
+    if b and len([w for w in b if w not in set(a) and not w.isdigit()]) <= 0.2 * len(b):
+        return True
+    if len(fixed) < len(raw) * 0.5 - 10:
         return False
     # Similar as letters ("Vireguard" / "WireGuard") or as words ("Flow Bispa" / "Wispr Flow"),
     # punctuation aside; an answer, a rewrite or a translation is neither.
-    a, b = _words(raw), [w for t in _words(fixed) for w in spelled(t)]
     letters = difflib.SequenceMatcher(None, " ".join(a), " ".join(b)).ratio()
     words = difflib.SequenceMatcher(None, a, b).ratio()
     return letters >= 0.6 or words >= 0.5
