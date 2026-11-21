@@ -14,8 +14,12 @@ The guard comes from omarchy-dictation's fixer (iris_dictation/fix.py): a reply 
 is not the transcript, give or take a few words, is dropped, and the raw text goes out. So does a
 reply that is late (--cleanup-timeout) or a server that is down.
 
-Long clips go in pieces of a few sentences (whole stretches of speech), so a prompt always fits
-the server's fixed context.
+A clip is cleaned in pieces of whole stretches of speech up to PIECE_CHARS (about 4 minutes of
+speech): measured 2026-11-21, the model applied a correction in the middle of 3,000 characters but
+missed it in 6,000 and 9,000 and dropped words. Each piece after the first gets the end of the one
+before as background; the server's context (-c 8192) holds the prompt, a piece, that background
+and the reply. A request may take TIMEOUT_PER_CHAR
+seconds a character of transcript longer than --cleanup-timeout.
 """
 
 from __future__ import annotations
@@ -29,7 +33,10 @@ from wordfreq import zipf_frequency
 
 log = logging.getLogger("claudia-listen")
 
-PIECE_CHARS = 1500   # about 400 tokens of transcript per request
+PIECE_CHARS = 3000      # about 750 tokens of transcript: the small model stays exact up to here
+CARRY_CHARS = 600       # the end of the piece before, as background for the next
+LONG_CHARS = 400        # a transcript this long may not lose half its length (see plausible)
+TIMEOUT_PER_CHAR = 0.005  # ~200 characters a second of reply, the slowest seen while the GPU is shared
 
 # ruff: noqa: E501  (the prompt is prose, one paragraph per line)
 SYSTEM = """You turn the transcript of dictated speech into the text the person meant to write. A person speaks; a speech recognizer writes down every sound and word, including the ones the person did not mean to say; you return the finished text. The person speaks Hungarian or English, sometimes both in one transcript.
@@ -102,7 +109,10 @@ def plausible(raw: str, fixed: str) -> bool:
     # Made of the spoken words, a few fixed (a grammar fix, a joined code): a cleanup, however much
     # shorter ("deploy staging, actually no, deploy main" is "Deploy main."). An answer or a rewrite
     # brings in words of its own. Numbers written as digits ("1.10.0") count as spoken.
-    if b and len([w for w in b if w not in set(a) and not w.isdigit()]) <= 0.2 * len(b):
+    # A long transcript that lost half of itself lost sentences the speaker meant (a small model
+    # can stop early or skip), so that goes to the checks below and is refused.
+    short_enough = len(raw) < LONG_CHARS or len(fixed) >= len(raw) * 0.5
+    if b and short_enough and len([w for w in b if w not in set(a) and not w.isdigit()]) <= 0.2 * len(b):
         return True
     if len(fixed) < len(raw) * 0.5 - 10:
         return False
@@ -178,6 +188,14 @@ def pieces(stretches: list[str]) -> list[str]:
     return out
 
 
+def with_before(system: str, before: str) -> str:
+    """The prompt for a piece after the first: the end of the transcript before it as background."""
+    if not before:
+        return system
+    return (system + "\n\nThe transcript before this piece (already cleaned, background only; clean "
+            f"only the transcript you get):\n<before>{before}</before>")
+
+
 class Cleaner:
     def __init__(self, url: str, key: str, timeout: float) -> None:
         self.url = url.rstrip("/")
@@ -192,9 +210,10 @@ class Cleaner:
         if context:
             system += f"\n\nContext:\n<context>{context}</context>"
         allowed = {w for t in (*words, context) for w in _words(t)}
-        out = []
+        out, before = [], ""
         for piece in pieces(stretches):
-            out.append(await self.piece(system, piece, allowed))
+            out.append(await self.piece(with_before(system, before), piece, allowed))
+            before = piece[-CARRY_CHARS:]
         return " ".join(out)
 
     async def piece(self, system: str, raw: str, allowed: set[str]) -> str:
@@ -202,7 +221,8 @@ class Cleaner:
             r = await self.http.post(f"{self.url}/v1/chat/completions", json={
                 "messages": [{"role": "system", "content": system},
                              {"role": "user", "content": f"<transcript>{raw}</transcript>"}],
-                "temperature": 0, "max_tokens": len(raw) + 64, "stream": False})
+                "temperature": 0, "max_tokens": len(raw) + 64, "stream": False},
+                timeout=self.timeout + len(raw) * TIMEOUT_PER_CHAR)
             r.raise_for_status()
             reply = r.json()["choices"][0]["message"]["content"] or ""
         except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
