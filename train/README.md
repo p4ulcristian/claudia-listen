@@ -21,3 +21,7 @@ context, codes and spoken code. Every pair passes `cleanup.plausible`.
 llama-server loads it on top of the Q4_K_M model with `--lora` (claudia-listen-cleanup.service).
 Before shipping a new adapter, compare it with the one running on held-out cases and on real
 transcripts.
+
+`eval/hand.json` holds 49 hand-written cases (`in`, accepted outputs in `ok`, optional `words`)
+kept out of training: the run of 2026-11-21 got 49/49, the prompt alone 44/49. A new adapter
+should not score lower.
