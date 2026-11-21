@@ -49,6 +49,7 @@ Then:
 - Replace a word or phrase with a vocabulary term, or with a name or term from the context, only when it sounds like that term AND the sentence plainly means it. When in doubt, leave it as it is. Never bring in a name that is in neither. Write such terms exactly as they are spelled there.
 - Fix punctuation and capitalization so the text reads as written sentences. The recognizer cuts the speech at pauses, so a sentence may be broken in the middle by a stray full stop or capital letter: join it back. A question gets a question mark.
 - Never translate. Every sentence stays in the language it was spoken in, Hungarian as Hungarian, English as English, a mix stays a mix.
+- A code spelled out character by character (a commit hash, an ID, a version, a reference number) becomes one word, digits as digits: "seven B E F A eight A" becomes "7befa8a", "A B C one two three" becomes "ABC123", "hét B E F A nyolc A" becomes "7befa8a". A hex code (only digits and the letters a to f, like a commit hash) is written in lower case. Ordinary numbers in a sentence stay as they were said.
 - Fix grammar mistakes, in English and in Hungarian: word order ("can you tell me what do you suggest" becomes "can you tell me what you suggest", "I don't know where is it" becomes "I don't know where it is"), verb forms, missing or wrong articles and prepositions. Fix only what is wrong; correct sentences stay as they are.
 - Keep everything else as the person said it: their own words and tone, even when informal or blunt, swear words too. Do not rephrase, summarize, make it formal, or add anything.
 - Keep words that carry meaning even when they look like the ones to remove: a "no" that answers or asks ("No, that's wrong", "two tables, no?"), a repeat for emphasis ("much much better", "very very good"), an "or" that offers a choice. Never turn a correction into a choice: "five, no, six" means six, not "five or six".
@@ -97,10 +98,22 @@ def plausible(raw: str, fixed: str) -> bool:
         return False
     # Similar as letters ("Vireguard" / "WireGuard") or as words ("Flow Bispa" / "Wispr Flow"),
     # punctuation aside; an answer, a rewrite or a translation is neither.
-    a, b = _words(raw), _words(fixed)
+    a, b = _words(raw), [w for t in _words(fixed) for w in spelled(t)]
     letters = difflib.SequenceMatcher(None, " ".join(a), " ".join(b)).ratio()
     words = difflib.SequenceMatcher(None, a, b).ratio()
     return letters >= 0.6 or words >= 0.5
+
+
+DIGITS = "zero one two three four five six seven eight nine".split()
+
+
+def spelled(word: str) -> list[str]:
+    """A code the cleanup joined ("7befa8a": letters and digits) as it was spoken, a character at a
+    time ("seven b e f a eight a"), so the guard compares it with the transcript; other words as
+    they are."""
+    if not (any(ch.isdigit() for ch in word) and any(ch.isalpha() for ch in word)):
+        return [word]
+    return [DIGITS[int(ch)] if ch.isdigit() else ch for ch in word]
 
 
 def _words(text: str) -> list[str]:
@@ -114,8 +127,8 @@ def is_name(token: str) -> bool:
     """Whether a word of the reply reads as a name or term: a capital inside ("PostHog"), or a
     capital first letter on a word that is rare in both English and Hungarian ("Postgres")."""
     word = token.strip(".,;:!?\"'()…")
-    if not word or not any(ch.isupper() for ch in word):
-        return False
+    if not word or not any(ch.isupper() for ch in word) or any(ch.isdigit() for ch in word):
+        return False   # a code with digits in it ("ABC123") is spelled, not a name
     if any(ch.isupper() for ch in word[1:]):
         return True
     w = word.lower()
