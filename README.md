@@ -40,8 +40,11 @@ any program ── Bearer token, a clip (+ language, speaker) ──▶ claudia-
   a caller's `prompt` go into the model's system prompt as context, which Qwen3-ASR leans towards
   for names and terms. Write the words as they should be written: capitals count.
 - **Cleanup**: llama-server runs Gemma 4 E4B (Q4_K_M) on localhost. It gets the raw text and the
-  speaker's words, and fixes misheard words from the list, punctuation and capitals, and drops
-  filler sounds (uh, um, öö); it never translates or answers. A reply that is not the transcript
+  speaker's words and returns what the speaker meant to write: it drops filler sounds (uh, um, öö),
+  filler words that carry no meaning, repeats, false starts and self-corrections ("Monday, no
+  wait, Tuesday" becomes "Tuesday"), fixes grammar mistakes, misheard words from the list,
+  punctuation and capitals; it keeps the speaker's own words and tone, and never translates or
+  answers. A reply that is not the transcript
   give or take a few words (the guard from omarchy-dictation's fixer), a late reply
   (`--cleanup-timeout`) or a server that is down: the raw text goes out as `text`.
 - **Memory** cannot creep: the speech model takes about 3.9 GB (4.5 GB with the CUDA context),
