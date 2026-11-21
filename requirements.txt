@@ -1,5 +1,5 @@
 # Installed into .venv by install.sh. torch's CUDA 12.8 wheels bring their own CUDA; nothing
-# system wide. transformers 5.23 has Qwen3-ASR built in (Musci-ASR-qwen-1019 is one).
+# system wide. transformers 5.23 has ParakeetForTDT built in (Fluid Speech Pro is one).
 --extra-index-url https://download.pytorch.org/whl/cu128
 torch==2.11.0+cu128
 transformers==5.23.0

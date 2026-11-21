@@ -1,20 +1,19 @@
-"""claudia-listen: speech to finished text on your own GPU. Musci-ASR-qwen-1019 hears, each
-person's own word list steers it, a small local language model cleans the text up; behind OpenAI's
-transcription API.
+"""claudia-listen: speech to finished text on your own GPU. Fluid Speech Pro hears (English,
+Hungarian and 23 more languages, which it tells apart itself), a small local language model cleans
+the text up with each person's own word list; behind OpenAI's transcription API.
 
     POST /v1/audio/transcriptions   multipart form → {"text": cleaned, "raw": heard}
         file             the clip: WAV, FLAC, OGG, MP3, MP4/M4A or WebM (what browsers record;
                          anything FFmpeg reads), any rate, mono or not
-        language         optional, e.g. "hu": the language the clip is in (Qwen3-ASR's 30); none
-                         means "en", and speech in another language is still written in it
-        speaker          optional: whose word list steers the model and the cleanup (an opaque
-                         string, e.g. a sign-in email); none = no list
+        language         accepted and ignored: the model hears the language itself
+        speaker          optional: whose word list the cleanup uses (an opaque string, e.g. a
+                         sign-in email); none = no list
         cleanup          optional, "false" skips the cleanup: then text == raw
-        prompt           optional: names and terms, comma separated, the model leans towards
-                         (with the speaker's word list)
+        prompt           optional: names and terms, comma separated, for the cleanup (with the
+                         speaker's word list)
         context          optional: text around the dictation (a chat's last messages, a document);
-                         its last 200 words steer the model and the cleanup towards the names and
-                         terms in it, as background only, never as an instruction
+                         its last 200 words help the cleanup spell the names and terms in it, as
+                         background only, never as an instruction
         response_format  "json" (default) or "text" (the cleaned text alone)
         model            accepted and ignored (OpenAI's clients send it)
     GET  /v1/vocabulary/{speaker}   → {"words": [...]}  ([] for a speaker never seen)
@@ -77,10 +76,7 @@ CUTS = {"min_silence_duration_ms": 250, "max_speech_duration_s": 20, "speech_pad
 # Stretches next to each other are heard together, up to this much audio from the first one's start
 # to the last one's end: the model hears whole sentences with what came before, and no silence.
 CHUNK_SECONDS = 30
-# Room for the text: English speech is about 3 words, 4 tokens a second; twice that and a margin.
-TOKENS_PER_SECOND = 8
-WARMUP_CONTEXT_WORDS = 300   # the model's whole context (word list, prompt, context) is cut to this
-CONTEXT_WORDS = 200          # a caller's context: its newest words
+CONTEXT_WORDS = 200          # a caller's context: its newest words (for the cleanup)
 
 
 class GpuFull(Exception):
@@ -108,14 +104,11 @@ def chunked(cuts: list[dict]) -> list[tuple[int, int]]:
 
 
 class Speech:
-    """Musci-ASR-qwen-1019 (a Qwen3-ASR-1.7B fine-tune for English; transformers, bf16) on the GPU,
-    behind Silero VAD (on the GPU too).
-
-    The language goes in the prompt (English unless the caller names another). Qwen3-ASR knows 30
-    languages and the fine-tune kept them: told English, it still writes Hungarian speech as
-    Hungarian (seen 2026-11-18; its Hungarian error rate is not measured). A clip's context
-    (the speaker's word list and the caller's prompt) is the system prompt, which Qwen3-ASR leans
-    towards for names and terms. Silero finds the speech; chunks of it go through the model in batches.
+    """Fluid Speech Pro (a Parakeet-TDT-0.6B-v3 fine-tune, 25 languages; transformers'
+    ParakeetForTDT, bf16) on the GPU, behind Silero VAD (on the GPU too). It hears the language
+    itself; the speaker's words and a caller's context go to the cleanup, not to it (measured
+    2026-11-21: 20 of 20 made-up names right after the cleanup either way). Silero finds the
+    speech; chunks of it go through the model in batches, greedy decoding.
 
     After `idle` seconds without a clip the model is parked in RAM and its GPU memory given back;
     the next clip brings it back (a second or two). Every call runs on the one model thread.
@@ -130,12 +123,10 @@ class Speech:
     def load(self) -> None:
         import torch
         from silero_vad import load_silero_vad
-        from transformers import Qwen3ASRForConditionalGeneration, Qwen3ASRProcessor
+        from transformers import AutoProcessor, ParakeetForTDT
 
-        # Its defaults pad a batch on the left, so every answer starts at the same place.
-        self.processor = Qwen3ASRProcessor.from_pretrained(self.path)
-        self.model = Qwen3ASRForConditionalGeneration.from_pretrained(
-            self.path, dtype=torch.bfloat16, attn_implementation="sdpa").to("cuda").eval()
+        self.processor = AutoProcessor.from_pretrained(self.path)
+        self.model = ParakeetForTDT.from_pretrained(self.path, dtype=torch.bfloat16).to("cuda").eval()
         self.vad = load_silero_vad().to("cuda")
         self.state = "gpu"
 
@@ -167,21 +158,20 @@ class Speech:
         log.info("idle: model parked in RAM, GPU memory given back")
 
     def warmup(self) -> None:
-        """Run the model once at the largest size a clip can ask for: `batch` chunks of CHUNK_SECONDS,
-        a long context, every answer as long as allowed. The GPU memory that takes stays reserved by
-        torch for this process (nothing calls empty_cache after a clip), so another program on the
-        GPU can't take the room a clip needs. Stopping the server gives it all back."""
+        """Run the model once at the largest size a clip can ask for: `batch` chunks of
+        CHUNK_SECONDS. The GPU memory that takes stays reserved by torch for this process (nothing
+        calls empty_cache after a clip), so another program on the GPU can't take the room a clip
+        needs. Stopping the server gives it all back."""
         import torch
 
         noise = np.random.default_rng(0).normal(0, 0.01, RATE * CHUNK_SECONDS).astype(np.float32)
-        context = " ".join(["Claudia"] * WARMUP_CONTEXT_WORDS)
-        self.batch_written([noise] * self.batch, "en", context, force_longest=True)
-        self.batch_written([noise], "en", "", force_longest=True)
+        self.batch_written([noise] * self.batch)
+        self.batch_written([noise])
         log.info("GPU memory reserved for clips: %.2f GB (in use %.2f GB, peak %.2f GB)",
                  torch.cuda.memory_reserved() / 1e9, torch.cuda.memory_allocated() / 1e9,
                  torch.cuda.max_memory_allocated() / 1e9)
 
-    def recognize(self, samples: np.ndarray, language: str, context: str) -> list[str]:
+    def recognize(self, samples: np.ndarray) -> list[str]:
         """16 kHz audio → the text of each chunk of speech. Out of GPU memory (a clip larger than the
         warm-up): the chunks go again one at a time; still out: GpuFull."""
         import torch
@@ -192,7 +182,7 @@ class Speech:
             return []
         for batch in (self.batch, 1):
             try:
-                return self.written(chunks, language, context, batch)
+                return self.written(chunks, batch)
             except torch.OutOfMemoryError:
                 log.warning("out of GPU memory with %d chunks at a time", batch)
                 gc.collect()
@@ -209,29 +199,21 @@ class Speech:
             log.info("no speech found: loudest %.4f rms over 0.1 s", loudest_rms(samples))
         return [samples[start:end] for start, end in chunked(cuts)]
 
-    def written(self, chunks: list[np.ndarray], language: str, context: str, batch: int) -> list[str]:
+    def written(self, chunks: list[np.ndarray], batch: int) -> list[str]:
         texts = []
         for i in range(0, len(chunks), batch):
-            texts += self.batch_written(chunks[i:i + batch], language, context)
+            texts += self.batch_written(chunks[i:i + batch])
         return [t for t in texts if t]
 
-    def batch_written(self, chunks: list[np.ndarray], language: str, context: str,
-                      force_longest: bool = False) -> list[str]:
-        """Some chunks through the model at once; greedy decoding. `force_longest`: every answer runs
-        to the token limit (the warm-up's largest size)."""
+    def batch_written(self, chunks: list[np.ndarray]) -> list[str]:
+        """Some chunks through the model at once (padded to the longest); greedy decoding."""
         import torch
 
-        n = len(chunks)
-        inputs = self.processor.apply_transcription_request(
-            list(chunks), language=[language] * n, prompt=[context] * n if context else None,
-        ).to("cuda", torch.bfloat16)
-        longest = max(len(c) for c in chunks) / RATE
-        limit = int(longest * TOKENS_PER_SECOND) + 32
+        inputs = self.processor(list(chunks), sampling_rate=RATE, return_tensors="pt",
+                                padding=True).to("cuda", torch.bfloat16)
         with torch.inference_mode():
-            out = self.model.generate(**inputs, do_sample=False, max_new_tokens=limit,
-                                      min_new_tokens=limit if force_longest else None)
-        answers = out[:, inputs["input_ids"].shape[1]:]
-        return [self.processor.decode(a, skip_special_tokens=True).strip() for a in answers]
+            out = self.model.generate(**inputs)
+        return [t.strip() for t in self.processor.batch_decode(out.sequences, skip_special_tokens=True)]
 
 
 class Vocabulary:
@@ -374,7 +356,7 @@ async def put_vocabulary(speaker: str, body: dict = Body(...)):
 @app.post("/v1/audio/transcriptions")
 async def transcriptions(
     file: UploadFile,
-    language: str = Form(""),
+    language: str = Form(""),       # accepted and ignored: the model hears the language itself
     speaker: str = Form(""),
     cleanup: str = Form("true"),
     prompt: str = Form(""),
@@ -384,18 +366,10 @@ async def transcriptions(
 ):
     if response_format not in ("json", "text"):
         raise HTTPException(400, 'response_format: "json" or "text"')
-    from transformers.models.qwen3_asr.processing_qwen3_asr import LANGUAGE_CODE_TO_NAME
-
-    language = language.strip().lower() or "en"
-    if language not in LANGUAGE_CODE_TO_NAME:
-        raise HTTPException(400, f"language: one of {', '.join(sorted(LANGUAGE_CODE_TO_NAME))}")
     clean = cleanup.strip().lower() not in ("false", "0", "no", "off")
     speaker = speaker_of(speaker)
     words = vocabulary.get(speaker) if speaker else []
-    terms = ", ".join(w for w in (*words, prompt.strip()) if w)
     around = newest_words(context, CONTEXT_WORDS)
-    # The GPU room was reserved at start for WARMUP_CONTEXT_WORDS: the caller's context gives way.
-    hint = "\n".join(t for t in (terms, newest_words(around, WARMUP_CONTEXT_WORDS - len(terms.split()))) if t)
     if file.size is not None and file.size > MAX_BYTES:
         raise HTTPException(413, f"the clip is over {MAX_BYTES // (1024 * 1024)} MB")
     data = await file.read()
@@ -406,7 +380,7 @@ async def transcriptions(
 
     t0 = time.time()
     try:
-        chunks = await on_model(speech.recognize, samples, language, hint) if len(samples) else []
+        chunks = await on_model(speech.recognize, samples) if len(samples) else []
     except GpuFull as exc:
         raise HTTPException(503, "the GPU has no memory left just now: send the clip again") from exc
     raw = " ".join(chunks)
@@ -459,7 +433,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--host", action="append", help="address to listen on; repeat for more (default 127.0.0.1)")
     ap.add_argument("--port", type=int, default=7862)
-    ap.add_argument("--model", type=Path, required=True, help="Musci-ASR-qwen-1019's folder (transformers)")
+    ap.add_argument("--model", type=Path, required=True, help="Fluid Speech Pro's folder (transformers)")
     ap.add_argument("--token-file", required=True, type=Path,
                     help="file holding the bearer token every request must carry")
     ap.add_argument("--data-dir", required=True, type=Path, help="where the word lists are kept")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install claudia-listen (Musci-ASR-qwen-1019 + word lists + cleanup) as two user services. Safe to run again.
+# Install claudia-listen (Fluid Speech Pro + word lists + cleanup) as two user services. Safe to run again.
 #
 #   ./install.sh
 #   LISTEN_HOSTS="127.0.0.1 <vpn address>" ./install.sh   # also listen on the VPN
@@ -47,13 +47,16 @@ if [ ! -x "$LLAMA/llama-server" ]; then
   cd "$HERE"
 fi
 
-echo "Fetching Musci-ASR-qwen-1019 and Gemma 4 E4B (Q4_K_M) into $MODELS (about 9 GB the first time) ..."
+echo "Fetching Fluid Speech Pro and Gemma 4 E4B (Q4_K_M) into $MODELS (about 7.5 GB the first time) ..."
 mkdir -p "$MODELS"
 .venv/bin/python - "$MODELS" <<'PY'
 import sys
 from huggingface_hub import hf_hub_download, snapshot_download
-snapshot_download("Musci-research/Musci-ASR-qwen-1019-hf", revision="90caacb67144e9f105dc1b66964789ae803b6b29",
-                  local_dir=f"{sys.argv[1]}/musci-asr-qwen-1019")
+# The transformers weights only (the .nemo file is the same model for NeMo).
+snapshot_download("FluidVoice-Labs/fluid-speech-pro", revision="46027a3bffc5817ce8f9b29add0a062610134a90",
+                  allow_patterns=["config.json", "generation_config.json", "model.safetensors", "processor_config.json",
+                                  "tokenizer.json", "tokenizer_config.json", "LICENSE", "NOTICE"],
+                  local_dir=f"{sys.argv[1]}/fluid-speech-pro")
 hf_hub_download("unsloth/gemma-4-E4B-it-GGUF", "gemma-4-E4B-it-Q4_K_M.gguf", local_dir=f"{sys.argv[1]}/gemma")
 PY
 # The cleanup's LoRA adapter (train/: trained on train/data with train/train.py), from this repo's release.
