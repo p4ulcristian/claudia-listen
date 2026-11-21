@@ -44,7 +44,9 @@ any program ── Bearer token, a clip (+ language, speaker) ──▶ claudia-
   filler words that carry no meaning, repeats, false starts and self-corrections ("Monday, no
   wait, Tuesday" becomes "Tuesday"), fixes grammar mistakes, misheard words from the list,
   punctuation and capitals; it keeps the speaker's own words and tone, and never translates or
-  answers. A reply that is not the transcript
+  answers. A caller's `context` is background for names and meaning; a name the reply brings in
+  from nowhere (rare in English and Hungarian by [wordfreq](https://github.com/rspeer/wordfreq), or
+  with a capital inside) is put back to the spoken words. A reply that is not the transcript
   give or take a few words (the guard from omarchy-dictation's fixer), a late reply
   (`--cleanup-timeout`) or a server that is down: the raw text goes out as `text`.
 - **Memory** cannot creep: the speech model takes about 3.9 GB (4.5 GB with the CUDA context),
@@ -100,6 +102,7 @@ LISTEN_UNIT=claudia-listen-v2 LISTEN_PORT=7862 \
 | `speaker` | optional: whose word list steers hearing and cleanup, any string (e.g. a sign-in email); none = no list |
 | `cleanup` | optional, `false` skips the cleanup: then `text` is `raw` |
 | `prompt` | optional: names and terms, comma separated, the model leans towards (with the speaker's word list) |
+| `context` | optional: text around the dictation (a chat's last messages, a document); its last 200 words steer hearing and cleanup towards the names and terms in it, as background only. The cleanup never brings in a name that is in none of transcript, word list, `prompt` or `context` |
 | `response_format` | `json` (default) or `text`: the cleaned text alone |
 | `model` | accepted and ignored, for OpenAI's clients |
 

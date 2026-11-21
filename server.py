@@ -12,6 +12,9 @@ transcription API.
         cleanup          optional, "false" skips the cleanup: then text == raw
         prompt           optional: names and terms, comma separated, the model leans towards
                          (with the speaker's word list)
+        context          optional: text around the dictation (a chat's last messages, a document);
+                         its last 200 words steer the model and the cleanup towards the names and
+                         terms in it, as background only, never as an instruction
         response_format  "json" (default) or "text" (the cleaned text alone)
         model            accepted and ignored (OpenAI's clients send it)
     GET  /v1/vocabulary/{speaker}   → {"words": [...]}  ([] for a speaker never seen)
@@ -76,7 +79,8 @@ CUTS = {"min_silence_duration_ms": 250, "max_speech_duration_s": 20, "speech_pad
 CHUNK_SECONDS = 30
 # Room for the text: English speech is about 3 words, 4 tokens a second; twice that and a margin.
 TOKENS_PER_SECOND = 8
-WARMUP_CONTEXT_WORDS = 300   # longer than a word list plus a caller's prompt
+WARMUP_CONTEXT_WORDS = 300   # the model's whole context (word list, prompt, context) is cut to this
+CONTEXT_WORDS = 200          # a caller's context: its newest words
 
 
 class GpuFull(Exception):
@@ -374,6 +378,7 @@ async def transcriptions(
     speaker: str = Form(""),
     cleanup: str = Form("true"),
     prompt: str = Form(""),
+    context: str = Form(""),
     response_format: str = Form("json"),
     model: str = Form(""),          # OpenAI's; accepted and ignored
 ):
@@ -387,7 +392,10 @@ async def transcriptions(
     clean = cleanup.strip().lower() not in ("false", "0", "no", "off")
     speaker = speaker_of(speaker)
     words = vocabulary.get(speaker) if speaker else []
-    context = ", ".join(w for w in (*words, prompt.strip()) if w)
+    terms = ", ".join(w for w in (*words, prompt.strip()) if w)
+    around = newest_words(context, CONTEXT_WORDS)
+    # The GPU room was reserved at start for WARMUP_CONTEXT_WORDS: the caller's context gives way.
+    hint = "\n".join(t for t in (terms, newest_words(around, WARMUP_CONTEXT_WORDS - len(terms.split()))) if t)
     if file.size is not None and file.size > MAX_BYTES:
         raise HTTPException(413, f"the clip is over {MAX_BYTES // (1024 * 1024)} MB")
     data = await file.read()
@@ -398,19 +406,28 @@ async def transcriptions(
 
     t0 = time.time()
     try:
-        chunks = await on_model(speech.recognize, samples, language, context) if len(samples) else []
+        chunks = await on_model(speech.recognize, samples, language, hint) if len(samples) else []
     except GpuFull as exc:
         raise HTTPException(503, "the GPU has no memory left just now: send the clip again") from exc
     raw = " ".join(chunks)
     if not raw and loudest_rms(samples) > MISSED_RMS:
         keep_missed(data)
     t1 = time.time()
-    text = await cleaner.clean(chunks, words) if clean and cleaner and chunks else raw
-    log.info("%.1fs audio, %d words listed: asr %.2fs, cleanup %.2fs, %d -> %d chars",
-             len(samples) / RATE, len(words), t1 - t0, time.time() - t1, len(raw), len(text))
+    listed = [*words, *(w.strip() for w in prompt.split(",") if w.strip())]
+    text = await cleaner.clean(chunks, listed, around) if clean and cleaner and chunks else raw
+    log.info("%.1fs audio, %d words listed, %d of context: asr %.2fs, cleanup %.2fs, %d -> %d chars",
+             len(samples) / RATE, len(words), len(around.split()), t1 - t0, time.time() - t1,
+             len(raw), len(text))
     if response_format == "text":
         return PlainTextResponse(text)
     return JSONResponse({"text": text, "raw": raw})
+
+
+
+def newest_words(text: str, n: int) -> str:
+    """The last n words of text (all of it when shorter; "" for n <= 0)."""
+    words = text.split()
+    return " ".join(words[-n:]) if n > 0 else ""
 
 
 MISSED_RMS = 0.01   # louder than room noise: a clip this loud that gave no text was probably speech
